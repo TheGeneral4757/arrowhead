@@ -1,0 +1,939 @@
+<title>arrowhead design review</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Host+Grotesk:wght@400;500;600&family=Atkinson+Hyperlegible+Mono:wght@400;500&display=swap">
+<style>
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: Console (by request)
+ * nav: review tabs over the app shell, shell switchable sidebar or single dashboard · signature: the lane strip with the hit-error bar under it · states: idle, armed, playing, dry-run, empty history · console: amber for what you set, cool blue for what was measured
+ * axes: dark/grotesk-sans/chromatic-amber · posture: restrained · contrast: pass · v2.0.0 */
+/* Hallmark · pre-emit critique: P2 H2 E2 S2 R2 V1 · weakest: V, live figures are simulated, so every panel that shows them says so */
+/* waive F1: the owner requires straight quotes in all output */
+:root {
+  color-scheme: dark;
+  --space-3xs: 2px; --space-2xs: 4px; --space-xs: 8px; --space-sm: 12px; --space-md: 16px; --space-lg: 24px; --space-xl: 40px; --space-2xl: 64px;
+  --text-xs: 0.75rem; --text-sm: 0.875rem; --text-md: 1rem; --text-lg: 1.2rem; --text-xl: 1.44rem; --text-2xl: 1.728rem;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-micro: 120ms; --dur-short: 220ms;
+  --container: 1440px;
+  --z-raised: 10; --z-modal: 400;
+  --color-paper: oklch(17% 0.008 250); --color-paper-2: oklch(21% 0.009 250); --color-paper-3: oklch(13.5% 0.007 250);
+  --color-ink: oklch(95% 0.005 250); --color-ink-2: oklch(83% 0.008 250); --color-muted: oklch(71% 0.01 250);
+  --color-rule: oklch(31% 0.01 250); --color-rule-2: oklch(42% 0.012 250);
+  --color-accent: oklch(82% 0.15 80); --color-accent-ink: oklch(18% 0.04 75); --color-accent-soft: oklch(29% 0.05 80); --color-focus: oklch(82% 0.15 80);
+  --color-cool: oklch(77% 0.12 245); --color-cool-soft: oklch(29% 0.05 245);
+  --color-ok: oklch(76% 0.15 150); --color-ok-soft: oklch(24.5% 0.03 150); --color-bad: oklch(70% 0.17 25); --color-bad-soft: oklch(24.5% 0.035 25);
+  --color-scrim: oklch(10% 0.006 250 / 0.72);
+  /* game lanes: left, down, up, right */
+  --lane-1: oklch(66% 0.16 310); --lane-2: oklch(74% 0.12 225); --lane-3: oklch(76% 0.16 145); --lane-4: oklch(67% 0.18 25);
+  /* judgments */
+  --judge-sick: var(--color-cool); --judge-good: var(--color-ok); --judge-ok: oklch(80% 0.1 95); --judge-bad: oklch(72% 0.12 55); --judge-miss: var(--color-bad);
+  --font-display: "Host Grotesk", ui-sans-serif, system-ui, sans-serif; --font-body: var(--font-display);
+  --font-mono: "Atkinson Hyperlegible Mono", ui-monospace, monospace;
+  --radius-card: 10px; --radius-pill: 6px;
+  --tracking-display: -0.03em;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { overflow-x: clip; }
+html { scrollbar-color: var(--color-muted) var(--color-paper); }
+body { margin: 0; background: var(--color-paper-3); color: var(--color-ink); font-family: var(--font-body); font-size: var(--text-md); line-height: 1.5; -webkit-font-smoothing: antialiased; caret-color: var(--color-accent); }
+::selection { background: var(--color-accent-soft); }
+:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+h1, h2, h3 { margin: 0; font-family: var(--font-display); font-weight: 500; letter-spacing: var(--tracking-display); line-height: 1.15; overflow-wrap: break-word; min-width: 0; text-wrap: balance; }
+h1 { font-size: var(--text-2xl); } h2 { font-size: var(--text-lg); } h3 { font-size: var(--text-md); letter-spacing: -0.01em; }
+p { margin: 0; text-wrap: pretty; }
+button, input, select { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+.mono, .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--color-muted); }
+.small { font-size: var(--text-sm); }
+.xs { font-size: var(--text-xs); }
+
+/* page frame */
+.page { max-width: var(--container); margin-inline: auto; padding-block: var(--space-lg) var(--space-2xl); padding-left: max(var(--space-md), env(safe-area-inset-left, 0px)); padding-right: max(var(--space-md), env(safe-area-inset-right, 0px)); display: grid; gap: var(--space-lg); }
+.review-head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: var(--space-md); }
+.review-head p { color: var(--color-muted); max-width: 60ch; margin-top: var(--space-2xs); }
+.tabs { display: flex; flex-wrap: wrap; gap: var(--space-2xs); padding: var(--space-2xs); border: 1px solid var(--color-rule); border-radius: var(--radius-card); background: var(--color-paper); }
+.tab, .seg button { border: 0; background: transparent; padding: var(--space-xs) var(--space-sm); border-radius: var(--radius-pill); color: var(--color-ink-2); cursor: pointer; font-size: var(--text-sm); transition: background-color var(--dur-micro) var(--ease-out), color var(--dur-micro) var(--ease-out); }
+.tab:hover, .seg button:hover { background: var(--color-paper-2); color: var(--color-ink); }
+.tab[aria-selected="true"], .seg button[aria-pressed="true"] { background: var(--color-accent-soft); color: var(--color-accent); }
+.tab:active, .seg button:active { transform: translateY(1px); }
+
+/* buttons and controls */
+.btn { display: inline-flex; align-items: center; gap: var(--space-xs); min-height: 36px; padding: 0 var(--space-md); border-radius: var(--radius-pill); border: 1px solid var(--color-rule-2); background: var(--color-paper-2); color: var(--color-ink); cursor: pointer; font-size: var(--text-sm); transition: background-color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out); }
+.btn:hover { border-color: var(--color-muted); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn.primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-accent-ink); font-weight: 500; }
+.btn.primary:hover { background: var(--color-ink); border-color: var(--color-ink); }
+.btn.danger { border-color: var(--color-bad); color: var(--color-bad); background: var(--color-bad-soft); }
+.seg { display: inline-flex; gap: var(--space-3xs); padding: var(--space-3xs); border: 1px solid var(--color-rule); border-radius: var(--radius-pill); background: var(--color-paper-3); }
+.pill { display: inline-flex; align-items: center; gap: var(--space-2xs); padding: var(--space-3xs) var(--space-xs); border-radius: var(--radius-pill); font-size: var(--text-xs); border: 1px solid var(--color-rule-2); color: var(--color-ink-2); white-space: nowrap; }
+.pill.live { color: var(--color-ok); border-color: var(--color-ok); background: var(--color-ok-soft); }
+.pill.armed { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-soft); }
+.pill.cool { color: var(--color-cool); border-color: var(--color-cool); background: var(--color-cool-soft); }
+.pill.bad { color: var(--color-bad); border-color: var(--color-bad); background: var(--color-bad-soft); }
+input[type="range"] { width: 100%; accent-color: var(--color-accent); }
+.switch { position: relative; display: inline-flex; width: 36px; height: 20px; flex: none; }
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; z-index: 1; }
+.switch span { position: absolute; inset: 0; border-radius: 10px; background: var(--color-rule); transition: background-color var(--dur-micro) var(--ease-out); }
+.switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--color-ink-2); transition: transform var(--dur-short) var(--ease-out); }
+.switch input:checked + span { background: var(--color-accent); }
+.switch input:checked + span::after { transform: translateX(16px); background: var(--color-accent-ink); }
+.switch input:focus-visible + span { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+select { background: var(--color-paper-3); border: 1px solid var(--color-rule-2); border-radius: var(--radius-pill); padding: var(--space-2xs) var(--space-xs); min-height: 32px; }
+
+/* panels */
+.panel { color: var(--color-ink); background: var(--color-paper); border: 1px solid var(--color-rule); border-radius: var(--radius-card); min-width: 0; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); padding: var(--space-sm) var(--space-md); border-bottom: 1px solid var(--color-rule); flex-wrap: wrap; }
+.panel-body { padding: var(--space-md); display: grid; gap: var(--space-md); min-width: 0; }
+.note { font-size: var(--text-xs); color: var(--color-muted); }
+
+/* the prototype app shell */
+.proto-bar { display: flex; flex-wrap: wrap; gap: var(--space-md); align-items: center; justify-content: space-between; }
+.proto-bar .hint { color: var(--color-muted); font-size: var(--text-sm); max-width: 62ch; }
+.app { background: var(--color-paper); border: 1px solid var(--color-rule-2); border-radius: var(--radius-card); overflow: clip; display: grid; min-height: 720px; }
+.app-top { display: flex; align-items: center; gap: var(--space-md); padding: var(--space-xs) var(--space-md); border-bottom: 1px solid var(--color-rule); background: var(--color-paper-3); flex-wrap: wrap; }
+.brand { display: inline-flex; align-items: center; gap: var(--space-xs); font-weight: 500; letter-spacing: -0.01em; }
+.brand svg { width: 20px; height: 20px; }
+.app-top .spacer { flex: 1; }
+.app-top .status { display: flex; gap: var(--space-xs); flex-wrap: wrap; align-items: center; }
+.app-body { display: grid; min-height: 0; }
+.side { background: var(--color-paper-2); border-right: 1px solid var(--color-rule); padding: var(--space-sm); display: grid; align-content: start; gap: var(--space-3xs); }
+.side button { text-align: left; border: 0; background: transparent; border-radius: var(--radius-pill); padding: var(--space-xs) var(--space-sm); cursor: pointer; color: var(--color-ink-2); font-size: var(--text-sm); display: flex; justify-content: space-between; gap: var(--space-xs); transition: background-color var(--dur-micro) var(--ease-out); }
+.side button:hover { background: var(--color-paper); color: var(--color-ink); }
+.side button[aria-current="page"] { background: var(--color-accent-soft); color: var(--color-accent); }
+.side .key { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-muted); }
+.side-foot { margin-top: var(--space-lg); padding-top: var(--space-sm); border-top: 1px solid var(--color-rule); display: grid; gap: var(--space-2xs); }
+.main { padding: var(--space-md); display: grid; gap: var(--space-md); align-content: start; min-width: 0; }
+.screen { display: grid; gap: var(--space-md); align-content: start; min-width: 0; }
+.screen-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-md); flex-wrap: wrap; }
+.screen-head p { color: var(--color-muted); font-size: var(--text-sm); }
+.top-actions { display: none; gap: var(--space-2xs); }
+
+/* layout A: sidebar + one page */
+.app[data-layout="a"] .app-body { grid-template-columns: 200px minmax(0, 1fr); }
+.app[data-layout="a"].js .screen:not(.active) { display: none; }
+/* layout B: one dashboard, the rest in a drawer */
+.app[data-layout="b"] .side { display: none; }
+.app[data-layout="b"] .top-actions { display: inline-flex; }
+.app[data-layout="b"] .main { grid-template-columns: minmax(0, 1.65fr) minmax(300px, 1fr); }
+.app[data-layout="b"].js .screen.drawer-only { display: none; }
+.app[data-layout="b"] #s-live { grid-column: 1; }
+.app[data-layout="b"] #s-style { grid-column: 2; grid-row: 1; }
+.app[data-layout="b"] #s-style .advanced-wrap, .app[data-layout="b"] #s-style .style-extra { display: none; }
+.app[data-layout="b"] #s-style .style-grid { grid-template-columns: minmax(0, 1fr); }
+.app[data-layout="b"] .screen-head p.long { display: none; }
+.app[data-layout="b"].js .screen.drawer-open { display: grid; position: fixed; inset: 0 0 0 auto; width: min(560px, 100%); z-index: var(--z-modal); background: var(--color-paper); border-left: 1px solid var(--color-rule-2); padding: var(--space-lg); padding-top: calc(var(--space-lg) + env(safe-area-inset-top, 0px)); padding-right: max(var(--space-lg), env(safe-area-inset-right, 0px)); overflow-y: auto; }
+.scrim { position: fixed; inset: 0; background: var(--color-scrim); z-index: calc(var(--z-modal) - 1); }
+.drawer-close { display: none; }
+.screen.drawer-open .drawer-close { display: inline-flex; }
+
+/* live */
+.live-grid { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: var(--space-md); }
+.app[data-layout="b"] .live-grid { grid-template-columns: minmax(0, 260px) minmax(0, 1fr); }
+.lanes-wrap { background: var(--color-paper-3); border: 1px solid var(--color-rule); border-radius: var(--radius-card); position: relative; overflow: clip; }
+.lanes-wrap canvas { display: block; width: 100%; height: 440px; }
+.lane-legend { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--color-rule); }
+.lane-legend span { text-align: center; padding: var(--space-2xs); font-size: var(--text-xs); color: var(--color-muted); }
+.stack { display: grid; gap: var(--space-md); align-content: start; min-width: 0; }
+.hit canvas { width: 100%; height: 72px; display: block; }
+.hit-scale { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-muted); }
+.judges { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; background: var(--color-rule); border: 1px solid var(--color-rule); border-radius: var(--radius-card); overflow: clip; }
+.judge { background: var(--color-paper); padding: var(--space-sm); display: grid; gap: var(--space-3xs); }
+.judge .label { font-size: var(--text-sm); color: var(--color-ink-2); }
+.judge .count { font-family: var(--font-mono); font-size: var(--text-xl); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.judge .target { font-size: var(--text-xs); color: var(--color-muted); }
+.judge.sick .count { color: var(--judge-sick); } .judge.good .count { color: var(--judge-good); } .judge.okj .count { color: var(--judge-ok); } .judge.badj .count { color: var(--judge-bad); } .judge.miss .count { color: var(--judge-miss); }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--space-sm); }
+.metric { display: grid; gap: var(--space-3xs); }
+.metric .v { font-family: var(--font-mono); font-size: var(--text-lg); color: var(--color-cool); font-variant-numeric: tabular-nums; }
+.metric .k { font-size: var(--text-xs); color: var(--color-muted); }
+.metric svg { width: 100%; height: 24px; }
+.acc-line { display: flex; align-items: baseline; gap: var(--space-sm); flex-wrap: wrap; }
+.acc-line .big { font-family: var(--font-mono); font-size: var(--text-2xl); font-variant-numeric: tabular-nums; }
+.live-controls { display: flex; gap: var(--space-xs); flex-wrap: wrap; align-items: center; }
+
+/* setup */
+.steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-2xs); list-style: none; margin: 0; padding: 0; counter-reset: st; }
+.steps li { counter-increment: st; border-top: 2px solid var(--color-rule); padding-top: var(--space-xs); font-size: var(--text-sm); color: var(--color-muted); }
+.steps li::before { content: counter(st) " "; font-family: var(--font-mono); }
+.steps li.done { border-color: var(--color-cool); color: var(--color-ink-2); }
+.steps li.current { border-color: var(--color-accent); color: var(--color-accent); }
+.check-list { display: grid; gap: 1px; background: var(--color-rule); border: 1px solid var(--color-rule); border-radius: var(--radius-card); overflow: clip; }
+.check { background: var(--color-paper); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-xs) var(--space-md); padding: var(--space-sm) var(--space-md); align-items: center; }
+.check p { font-size: var(--text-sm); color: var(--color-muted); }
+.check code { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--color-ink-2); background: var(--color-paper-3); padding: var(--space-3xs) var(--space-2xs); border-radius: 4px; }
+.monitors { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space-sm); }
+.monitor { text-align: left; border: 1px solid var(--color-rule-2); background: var(--color-paper-3); border-radius: var(--radius-card); padding: var(--space-md); cursor: pointer; display: grid; gap: var(--space-xs); transition: border-color var(--dur-micro) var(--ease-out); }
+.monitor:hover { border-color: var(--color-muted); }
+.monitor[aria-pressed="true"] { border-color: var(--color-accent); }
+.monitor .screen-shape { aspect-ratio: 16 / 9; max-width: 100%; border: 1px solid var(--color-rule-2); border-radius: 4px; background: var(--color-paper-2); display: grid; place-items: center; font-size: var(--text-xs); color: var(--color-muted); }
+.calib { background: var(--color-paper-3); border: 1px solid var(--color-rule); border-radius: var(--radius-card); }
+.calib svg { width: 100%; height: auto; max-width: 100%; }
+.wizard-foot { display: flex; justify-content: space-between; gap: var(--space-sm); flex-wrap: wrap; }
+.keys { display: flex; gap: var(--space-2xs); flex-wrap: wrap; }
+kbd { font-family: var(--font-mono); font-size: var(--text-sm); min-width: 32px; text-align: center; padding: var(--space-2xs) var(--space-xs); border: 1px solid var(--color-rule-2); border-bottom-width: 2px; border-radius: 6px; background: var(--color-paper-2); }
+
+/* style */
+.style-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-md); }
+.presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--space-xs); }
+.preset { text-align: left; border: 1px solid var(--color-rule-2); background: var(--color-paper-3); border-radius: var(--radius-pill); padding: var(--space-xs) var(--space-sm); cursor: pointer; display: grid; gap: var(--space-3xs); transition: border-color var(--dur-micro) var(--ease-out); }
+.preset:hover { border-color: var(--color-muted); }
+.preset[aria-pressed="true"] { border-color: var(--color-accent); background: var(--color-accent-soft); }
+.preset b { font-weight: 500; font-size: var(--text-sm); }
+.preset span { font-size: var(--text-xs); color: var(--color-muted); }
+.target-row { display: grid; gap: var(--space-xs); }
+.target-row .readout { display: flex; justify-content: space-between; align-items: baseline; }
+.target-row .readout .num { font-size: var(--text-xl); color: var(--color-accent); }
+.dist { display: grid; gap: var(--space-xs); }
+.dist-bar { display: flex; height: 14px; border-radius: 4px; overflow: clip; background: var(--color-rule); }
+.dist-bar i { display: block; height: 100%; transition: flex-grow var(--dur-short) var(--ease-out); }
+.dist-rows { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--space-2xs) var(--space-sm); font-size: var(--text-sm); align-items: center; }
+.dist-rows .sw { width: 10px; height: 10px; border-radius: 2px; }
+.dist-rows .num { text-align: right; }
+.curve svg { width: 100%; height: 120px; }
+details.advanced { border: 1px solid var(--color-rule); border-radius: var(--radius-card); background: var(--color-paper-3); }
+details.advanced summary { cursor: pointer; padding: var(--space-sm) var(--space-md); font-size: var(--text-sm); color: var(--color-ink-2); list-style-position: inside; }
+details.advanced summary:hover { color: var(--color-ink); }
+.adv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-md); padding: var(--space-md); border-top: 1px solid var(--color-rule); }
+.field { display: grid; gap: var(--space-2xs); }
+.field label { font-size: var(--text-sm); color: var(--color-ink-2); display: flex; justify-content: space-between; gap: var(--space-xs); }
+.field label .num { color: var(--color-accent); font-size: var(--text-xs); }
+.field p { font-size: var(--text-xs); color: var(--color-muted); }
+.row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); }
+.row-text { display: grid; gap: var(--space-3xs); min-width: 0; }
+.row-text p { font-size: var(--text-xs); color: var(--color-muted); }
+
+/* history and settings */
+.table-wrap { overflow-x: auto; border: 1px solid var(--color-rule); border-radius: var(--radius-card); }
+table { border-collapse: collapse; width: 100%; font-size: var(--text-sm); }
+th { text-align: left; font-weight: 400; color: var(--color-muted); font-size: var(--text-xs); padding: var(--space-xs) var(--space-sm); border-bottom: 1px solid var(--color-rule); background: var(--color-paper-3); white-space: nowrap; }
+td { padding: var(--space-xs) var(--space-sm); border-bottom: 1px solid var(--color-rule); white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+tbody tr { transition: background-color var(--dur-micro) var(--ease-out); }
+tbody tr:hover { background: var(--color-paper-2); }
+.empty { border: 1px dashed var(--color-rule-2); border-radius: var(--radius-card); padding: var(--space-xl) var(--space-md); display: grid; gap: var(--space-xs); justify-items: start; }
+.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: var(--space-md); }
+.set-list { display: grid; gap: var(--space-md); }
+.hotkeys { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-xs) var(--space-md); align-items: center; font-size: var(--text-sm); }
+
+/* review sections */
+.doc { display: grid; gap: var(--space-lg); }
+.doc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--space-md); align-items: start; }
+.facts { display: grid; grid-template-columns: minmax(110px, auto) minmax(0, 1fr); font-size: var(--text-sm); }
+.facts dt, .facts dd { margin: 0; padding: var(--space-xs) var(--space-md); border-bottom: 1px solid var(--color-rule); }
+.facts dt { color: var(--color-muted); }
+.facts dd { color: var(--color-ink); }
+.facts dt:last-of-type, .facts dd:last-of-type { border-bottom: 0; }
+.open-q { color: var(--color-accent); }
+.compare td { white-space: normal; vertical-align: top; min-width: 140px; }
+.compare td:first-child { white-space: nowrap; color: var(--color-ink-2); }
+.compare tr.pick td { background: var(--color-accent-soft); }
+.verdict { display: grid; gap: var(--space-xs); padding: var(--space-md); border: 1px solid var(--color-accent); border-radius: var(--radius-card); background: var(--color-accent-soft); }
+.verdict p { color: var(--color-ink-2); max-width: 75ch; }
+.logos { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: var(--space-md); }
+.logo-card { color: var(--color-ink); border: 1px solid var(--color-rule); border-radius: var(--radius-card); background: var(--color-paper); padding: var(--space-md); display: grid; gap: var(--space-md); cursor: pointer; text-align: left; transition: border-color var(--dur-micro) var(--ease-out); }
+.logo-card:hover { border-color: var(--color-rule-2); }
+.logo-card[aria-pressed="true"] { border-color: var(--color-accent); }
+.logo-stage { display: flex; align-items: end; gap: var(--space-lg); }
+.logo-tile { width: 88px; height: 88px; border-radius: 20px; background: var(--color-paper-3); border: 1px solid var(--color-rule); display: grid; place-items: center; flex: none; }
+.logo-tile svg { width: 56px; height: 56px; }
+.logo-sm { display: flex; gap: var(--space-sm); align-items: center; }
+.logo-sm svg { width: 24px; height: 24px; }
+.logo-sm .tiny svg { width: 16px; height: 16px; }
+.logo-word { display: inline-flex; align-items: center; gap: var(--space-xs); font-weight: 500; font-size: var(--text-lg); letter-spacing: -0.02em; }
+.logo-word svg { width: 22px; height: 22px; }
+.logo-card p { font-size: var(--text-sm); color: var(--color-muted); }
+.ink-stroke { stroke: var(--color-ink); } .ink-fill { fill: var(--color-ink); } .acc-fill { fill: var(--color-accent); } .acc-stroke { stroke: var(--color-accent); } .cool-fill { fill: var(--color-cool); } .rule-stroke { stroke: var(--color-rule-2); } .muted-fill { fill: var(--color-muted); } .paper-fill { fill: var(--color-paper-3); }
+.l1 { fill: var(--lane-1); } .l2 { fill: var(--lane-2); } .l3 { fill: var(--lane-3); } .l4 { fill: var(--lane-4); }
+
+@media (max-width: 1100px) {
+  .app[data-layout="b"] .main { grid-template-columns: minmax(0, 1fr); }
+  .app[data-layout="b"] #s-style { grid-column: 1; grid-row: auto; }
+  .style-grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .app[data-layout="a"] .app-body { grid-template-columns: minmax(0, 1fr); }
+  .side { border-right: 0; border-bottom: 1px solid var(--color-rule); grid-auto-flow: column; overflow-x: auto; }
+  .side-foot { display: none; }
+  .live-grid, .app[data-layout="b"] .live-grid { grid-template-columns: minmax(0, 1fr); }
+  .lanes-wrap canvas { height: 300px; }
+  .judges { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .app { min-height: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+</style>
+
+<div class="page">
+  <header class="review-head">
+    <div>
+      <h1>arrowhead design review</h1>
+      <p>Clickable prototype of the v3 app, plus the decisions so far, the GUI stack choice and logo options. Figures in the prototype are simulated.</p>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Review sections">
+      <button class="tab" role="tab" id="t-proto" aria-selected="true" data-view="proto">Prototype</button>
+      <button class="tab" role="tab" id="t-stack" aria-selected="false" data-view="stack">GUI stack</button>
+      <button class="tab" role="tab" id="t-logo" aria-selected="false" data-view="logo">Logo</button>
+      <button class="tab" role="tab" id="t-spec" aria-selected="false" data-view="spec">Decisions</button>
+    </div>
+  </header>
+
+  <!-- ============ PROTOTYPE ============ -->
+  <section class="view" id="v-proto" role="tabpanel" aria-labelledby="t-proto">
+    <div class="proto-bar">
+      <div class="seg" role="group" aria-label="Layout">
+        <button id="lay-a" aria-pressed="true" data-layout="a">Layout 1: sidebar and pages</button>
+        <button id="lay-b" aria-pressed="false" data-layout="b">Layout 2: single dashboard</button>
+      </div>
+      <p class="hint">Layout 1 shows one page at a time. Layout 2 keeps the live view and the style controls on one screen, with setup, history and settings in a side drawer.</p>
+    </div>
+
+    <div class="app" id="app" data-layout="a" style="margin-top: var(--space-md)">
+      <div class="app-top">
+        <span class="brand">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 11h-5v9H9v-9H4Z" fill="none" stroke-width="1.8" stroke-linejoin="round" class="ink-stroke"/><path d="M2 14.5h20" stroke-width="1.8" class="acc-stroke"/></svg>
+          arrowhead
+        </span>
+        <span class="spacer"></span>
+        <div class="top-actions" role="group" aria-label="Open panel">
+          <button class="btn" data-drawer="s-setup">Setup</button>
+          <button class="btn" data-drawer="s-history">History</button>
+          <button class="btn" data-drawer="s-settings">Settings</button>
+        </div>
+        <div class="status">
+          <span class="pill live" id="st-state">Playing</span>
+          <span class="pill cool">PipeWire, DP-1</span>
+          <span class="pill">Sober focused</span>
+        </div>
+      </div>
+
+      <div class="app-body">
+        <nav class="side" aria-label="App pages">
+          <button data-screen="s-live" aria-current="page">Live <span class="key">1</span></button>
+          <button data-screen="s-style">Style <span class="key">2</span></button>
+          <button data-screen="s-setup">Setup <span class="key">3</span></button>
+          <button data-screen="s-history">History <span class="key">4</span></button>
+          <button data-screen="s-settings">Settings <span class="key">5</span></button>
+          <div class="side-foot xs muted">
+            <span>v0.1.0, Linux</span>
+            <span>Profile: 2560x1440 DP-1</span>
+          </div>
+        </nav>
+
+        <main class="main">
+          <!-- LIVE -->
+          <section class="screen active" id="s-live" aria-labelledby="h-live">
+            <div class="screen-head">
+              <div>
+                <h2 id="h-live">Example song, Hard</h2>
+                <p>Right side, downscroll, scroll speed fitted 2.8. Simulated session.</p>
+              </div>
+              <div class="live-controls">
+                <span class="pill armed" id="st-preset">Preset: Sweaty, 96%</span>
+                <button class="btn" id="btn-dry" aria-pressed="false">Dry run</button>
+                <button class="btn primary" id="btn-toggle">Pause</button>
+                <button class="btn danger" id="btn-panic">Panic, release all</button>
+              </div>
+            </div>
+            <div class="live-grid">
+              <div class="lanes-wrap">
+                <canvas id="lanes" aria-label="Lane visualiser: four lanes with notes scrolling toward the receptors"></canvas>
+                <div class="lane-legend"><span>left A</span><span>down S</span><span>up W</span><span>right D</span></div>
+              </div>
+              <div class="stack">
+                <div class="panel">
+                  <div class="panel-head"><h3>Accuracy</h3><span class="note">target set on the style page</span></div>
+                  <div class="panel-body">
+                    <div class="acc-line"><span class="big" id="acc">96.40%</span><span class="muted small">target <span class="mono" id="acc-target">96.0%</span>, controller holding</span></div>
+                    <div class="judges">
+                      <div class="judge sick"><span class="label">Sick</span><span class="count" id="c-sick">0</span><span class="target" id="tg-sick">target 0%</span></div>
+                      <div class="judge good"><span class="label">Good</span><span class="count" id="c-good">0</span><span class="target" id="tg-good">target 0%</span></div>
+                      <div class="judge okj"><span class="label">Ok</span><span class="count" id="c-ok">0</span><span class="target" id="tg-ok">target 0%</span></div>
+                      <div class="judge badj"><span class="label">Bad</span><span class="count" id="c-bad">0</span><span class="target" id="tg-bad">target 0%</span></div>
+                      <div class="judge miss"><span class="label">Miss</span><span class="count" id="c-miss">0</span><span class="target" id="tg-miss">target 0%</span></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="panel hit">
+                  <div class="panel-head"><h3>Hit error</h3><span class="note">last 40 hits, early left, late right</span></div>
+                  <div class="panel-body">
+                    <canvas id="hiterr" aria-label="Hit error bar showing recent hit timings against the judgment windows"></canvas>
+                    <div class="hit-scale"><span>-230 ms</span><span>-80</span><span>0</span><span>+80</span><span>+230 ms</span></div>
+                    <p class="note">Mean <span class="mono" id="hit-mean">+0.0 ms</span>, spread <span class="mono" id="hit-sd">0.0 ms</span>. Read back from the in-game ms popup when it is enabled.</p>
+                  </div>
+                </div>
+                <div class="panel">
+                  <div class="panel-head"><h3>Pipeline</h3><span class="note">simulated</span></div>
+                  <div class="panel-body">
+                    <div class="metrics">
+                      <div class="metric"><span class="k">Capture</span><span class="v" id="m-fps">165 fps</span><svg viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><polyline id="sp-fps" fill="none" stroke-width="1.5" class="cool-line"/></svg></div>
+                      <div class="metric"><span class="k">Capture to press</span><span class="v" id="m-lat">7.9 ms</span><svg viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><polyline id="sp-lat" fill="none" stroke-width="1.5"/></svg></div>
+                      <div class="metric"><span class="k">Frame jitter</span><span class="v" id="m-jit">0.4 ms</span><svg viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><polyline id="sp-jit" fill="none" stroke-width="1.5"/></svg></div>
+                      <div class="metric"><span class="k">Input offset applied</span><span class="v" id="m-off">-11 ms</span><svg viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"><polyline id="sp-off" fill="none" stroke-width="1.5"/></svg></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- STYLE -->
+          <section class="screen" id="s-style" aria-labelledby="h-style">
+            <div class="screen-head">
+              <div>
+                <h2 id="h-style">Style</h2>
+                <p class="long">Pick a preset or set a target. A player model makes the timing errors; a controller keeps the song near the target.</p>
+              </div>
+            </div>
+            <div class="style-grid">
+              <div class="panel">
+                <div class="panel-head"><h3>How it plays</h3></div>
+                <div class="panel-body">
+                  <div class="presets" role="group" aria-label="Presets">
+                    <button class="preset" data-preset="max" aria-pressed="false"><b>Max</b><span>Every note Sick</span></button>
+                    <button class="preset" data-preset="sweaty" aria-pressed="true"><b>Sweaty</b><span>Tight, rare slips</span></button>
+                    <button class="preset" data-preset="casual" aria-pressed="false"><b>Casual friend</b><span>Loose, misses jacks</span></button>
+                    <button class="preset" data-preset="rusty" aria-pressed="false"><b>Rusty</b><span>Late bias, tires</span></button>
+                  </div>
+                  <div class="target-row">
+                    <div class="readout"><label for="target">Target accuracy</label><span class="num" id="target-out">96.0%</span></div>
+                    <input type="range" id="target" min="80" max="100" step="0.5" value="96">
+                  </div>
+                  <div class="row style-extra">
+                    <div class="row-text"><span class="small">Match my friend</span><p>Reads the opponent's accuracy and stays within a margin of it.</p></div>
+                    <label class="switch"><input type="checkbox" id="match" aria-label="Match my friend"><span></span></label>
+                  </div>
+                  <div class="field style-extra" id="match-margin" hidden>
+                    <label for="margin">Stay ahead by <span class="num" id="margin-out">+0.5%</span></label>
+                    <input type="range" id="margin" min="-3" max="3" step="0.25" value="0.5">
+                    <p>Negative values stay just behind them.</p>
+                  </div>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="panel-head"><h3>Expected result</h3><span class="note">illustrative model</span></div>
+                <div class="panel-body">
+                  <div class="dist">
+                    <div class="dist-bar" id="dist-bar" aria-hidden="true"><i id="db-sick"></i><i id="db-good"></i><i id="db-ok"></i><i id="db-bad"></i><i id="db-miss"></i></div>
+                    <div class="dist-rows">
+                      <span class="sw" style="background: var(--judge-sick)"></span><span>Sick, within 45 ms</span><span class="num mono" id="d-sick">0%</span>
+                      <span class="sw" style="background: var(--judge-good)"></span><span>Good, within 80 ms</span><span class="num mono" id="d-good">0%</span>
+                      <span class="sw" style="background: var(--judge-ok)"></span><span>Ok, within 130 ms</span><span class="num mono" id="d-ok">0%</span>
+                      <span class="sw" style="background: var(--judge-bad)"></span><span>Bad, within 230 ms</span><span class="num mono" id="d-bad">0%</span>
+                      <span class="sw" style="background: var(--judge-miss)"></span><span>Miss</span><span class="num mono" id="d-miss">0%</span>
+                    </div>
+                  </div>
+                  <div class="curve">
+                    <svg id="curve" viewBox="0 0 300 120" preserveAspectRatio="none" role="img" aria-label="Timing error distribution against the judgment windows"></svg>
+                    <div class="hit-scale"><span>-230 ms</span><span>0</span><span>+230 ms</span></div>
+                  </div>
+                  <p class="note">Windows of 45, 80, 130 and 230 ms are inferred from community sources. They get measured in game before v0.1.</p>
+                </div>
+              </div>
+            </div>
+            <div class="advanced-wrap">
+              <details class="advanced" id="adv">
+                <summary>Advanced player model</summary>
+                <div class="adv-grid">
+                  <div class="field"><label for="a-bias">Timing bias <span class="num" id="o-bias">+3 ms</span></label><input type="range" id="a-bias" min="-25" max="25" value="3"><p>Positive presses late, like most people.</p></div>
+                  <div class="field"><label for="a-spread">Spread <span class="num" id="o-spread">1.00x</span></label><input type="range" id="a-spread" min="50" max="200" value="100"><p>Scales the error the target implies.</p></div>
+                  <div class="field"><label for="a-chord">Chord difficulty <span class="num" id="o-chord">0.30</span></label><input type="range" id="a-chord" min="0" max="100" value="30"><p>Extra error on two and three note chords.</p></div>
+                  <div class="field"><label for="a-jack">Jack difficulty <span class="num" id="o-jack">0.40</span></label><input type="range" id="a-jack" min="0" max="100" value="40"><p>Extra error on fast repeats in one lane.</p></div>
+                  <div class="field"><label for="a-fat">Fatigue <span class="num" id="o-fat">0.20</span></label><input type="range" id="a-fat" min="0" max="100" value="20"><p>Error grows over a long song.</p></div>
+                  <div class="field"><label for="a-drift">Focus drift <span class="num" id="o-drift">0.15</span></label><input type="range" id="a-drift" min="0" max="100" value="15"><p>Slow wander of the bias, like losing focus.</p></div>
+                  <div class="field"><label for="a-miss">Miss floor <span class="num" id="o-miss">0.4%</span></label><input type="range" id="a-miss" min="0" max="50" value="4"><p>Chance of a clean miss, whatever the timing.</p></div>
+                  <div class="field"><label for="a-rel">Hold release <span class="num" id="o-rel">18 ms</span></label><input type="range" id="a-rel" min="0" max="60" value="18"><p>Spread on when a hold is let go.</p></div>
+                </div>
+              </details>
+            </div>
+          </section>
+
+          <!-- SETUP -->
+          <section class="screen drawer-only" id="s-setup" aria-labelledby="h-setup">
+            <div class="screen-head">
+              <div><h2 id="h-setup">Setup</h2><p>Runs on first launch. Re-run any step from here.</p></div>
+              <button class="btn drawer-close" data-close>Close</button>
+            </div>
+            <ol class="steps" id="steps">
+              <li class="current">Permissions</li><li>Screen</li><li>Calibrate</li><li>Latency</li><li>Keys</li>
+            </ol>
+            <div class="wiz" data-step="0">
+              <div class="check-list">
+                <div class="check"><div><b class="small">Key output</b><p>The virtual keyboard needs <code>/dev/uinput</code> to be writable.</p></div><span class="pill live">Ready</span></div>
+                <div class="check"><div><b class="small">Global hotkeys</b><p>Reading <code>/dev/input</code> needs the input group: <code>sudo usermod -aG input $USER</code>, then log out and back in.</p></div><span class="pill bad">Missing</span></div>
+                <div class="check"><div><b class="small">Screen capture</b><p>xdg-desktop-portal ScreenCast found (KDE).</p></div><span class="pill live">Ready</span></div>
+                <div class="check"><div><b class="small">Game window</b><p>Sober (org.vinegarhq.Sober) is running.</p></div><span class="pill live">Ready</span></div>
+              </div>
+              <p class="note">Without the input group, everything works except hotkeys. Use the buttons in the app instead.</p>
+            </div>
+            <div class="wiz" data-step="1" hidden>
+              <p class="small muted">Pick the monitor the game is on. Your desktop's share dialog opens once; the choice is remembered.</p>
+              <div class="monitors" role="group" aria-label="Monitors">
+                <button class="monitor" aria-pressed="true"><span class="screen-shape">game here</span><span class="small">Main monitor</span><span class="xs muted mono">DP-1, 2560x1440, 165 Hz, scale 1.0</span></button>
+                <button class="monitor" aria-pressed="false"><span class="screen-shape">arrowhead here</span><span class="small">Second monitor</span><span class="xs muted mono">HDMI-A-1, 1920x1080, 60 Hz, scale 1.0</span></button>
+              </div>
+              <p class="note">Example monitors. Real names and modes come from the portal.</p>
+            </div>
+            <div class="wiz" data-step="2" hidden>
+              <p class="small muted">Start any song. arrowhead finds the receptors, measures the lane strips and checks scroll direction. Drag a box to nudge it.</p>
+              <div class="calib">
+                <svg viewBox="0 0 640 260" role="img" aria-label="Captured frame with four detected receptor boxes on the right side">
+                  <rect x="0" y="0" width="640" height="260" class="paper-fill"/>
+                  <g opacity="0.35">
+                    <rect x="60" y="200" width="36" height="36" rx="6" class="muted-fill"/><rect x="104" y="200" width="36" height="36" rx="6" class="muted-fill"/><rect x="148" y="200" width="36" height="36" rx="6" class="muted-fill"/><rect x="192" y="200" width="36" height="36" rx="6" class="muted-fill"/>
+                  </g>
+                  <g>
+                    <rect x="404" y="200" width="36" height="36" rx="6" class="l1" opacity="0.85"/><rect x="448" y="200" width="36" height="36" rx="6" class="l2" opacity="0.85"/><rect x="492" y="200" width="36" height="36" rx="6" class="l3" opacity="0.85"/><rect x="536" y="200" width="36" height="36" rx="6" class="l4" opacity="0.85"/>
+                    <rect x="400" y="20" width="44" height="220" fill="none" stroke-width="1" stroke-dasharray="4 3" class="acc-stroke"/>
+                    <rect x="444" y="20" width="44" height="220" fill="none" stroke-width="1" stroke-dasharray="4 3" class="acc-stroke"/>
+                    <rect x="488" y="20" width="44" height="220" fill="none" stroke-width="1" stroke-dasharray="4 3" class="acc-stroke"/>
+                    <rect x="532" y="20" width="44" height="220" fill="none" stroke-width="1" stroke-dasharray="4 3" class="acc-stroke"/>
+                    <rect x="448" y="90" width="36" height="36" rx="6" class="l2" opacity="0.6"/><rect x="536" y="40" width="36" height="36" rx="6" class="l4" opacity="0.6"/>
+                  </g>
+                  <text x="404" y="14" class="ink-fill" font-size="11" font-family="var(--font-mono)">strips found, right side, upscroll</text>
+                  <text x="60" y="190" class="muted-fill" font-size="11" font-family="var(--font-mono)">opponent lanes, ignored</text>
+                </svg>
+              </div>
+              <div class="row"><span class="small">Detected: right side, upscroll, lane pitch 44 px</span><button class="btn">Re-detect</button></div>
+            </div>
+            <div class="wiz" data-step="3" hidden>
+              <p class="small muted">Plays a short test in the game's tutorial or any song and compares each press with the judgment it got. arrowhead then shifts its timing to cancel the delay.</p>
+              <div class="check-list">
+                <div class="check"><div><b class="small">Capture delay</b><p>Frame on screen to frame in arrowhead.</p></div><span class="mono">6.1 ms</span></div>
+                <div class="check"><div><b class="small">Input delay</b><p>Key sent to key seen by the game.</p></div><span class="mono">4.8 ms</span></div>
+                <div class="check"><div><b class="small">Offset applied</b><p>Presses are sent this much earlier.</p></div><span class="mono" style="color: var(--color-accent)">-11 ms</span></div>
+              </div>
+              <p class="note">Example figures. The real ones are measured on your machine.</p>
+            </div>
+            <div class="wiz" data-step="4" hidden>
+              <p class="small muted">Funky Friday accepts both sets by default. arrowhead presses the set you pick.</p>
+              <div class="seg" role="group" aria-label="Key set"><button aria-pressed="true">A S W D</button><button aria-pressed="false">Arrow keys</button><button aria-pressed="false">Custom</button></div>
+              <div class="keys"><kbd>A</kbd><kbd>S</kbd><kbd>W</kbd><kbd>D</kbd></div>
+            </div>
+            <div class="wizard-foot">
+              <button class="btn" id="wiz-back" disabled>Back</button>
+              <button class="btn primary" id="wiz-next">Next</button>
+            </div>
+          </section>
+
+          <!-- HISTORY -->
+          <section class="screen drawer-only" id="s-history" aria-labelledby="h-history">
+            <div class="screen-head">
+              <div><h2 id="h-history">History</h2><p>One row per song. Example rows.</p></div>
+              <div class="live-controls">
+                <div class="seg" role="group" aria-label="History state"><button aria-pressed="true" data-hist="full">With songs</button><button aria-pressed="false" data-hist="empty">Empty</button></div>
+                <button class="btn drawer-close" data-close>Close</button>
+              </div>
+            </div>
+            <div id="hist-full" class="table-wrap">
+              <table>
+                <thead><tr><th>When</th><th>Song</th><th>Preset</th><th class="num">Accuracy</th><th class="num">Sick</th><th class="num">Good</th><th class="num">Ok</th><th class="num">Miss</th><th class="num">Drift</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">21 Nov 21:42</td><td>Example song A, Hard</td><td>Sweaty</td><td class="num">96.2%</td><td class="num">612</td><td class="num">41</td><td class="num">9</td><td class="num">3</td><td class="num">+1.2</td></tr>
+                  <tr><td class="mono">21 Nov 21:38</td><td>Example song B, Normal</td><td>Casual friend</td><td class="num">89.7%</td><td class="num">301</td><td class="num">62</td><td class="num">21</td><td class="num">11</td><td class="num">+4.8</td></tr>
+                  <tr><td class="mono">21 Nov 21:31</td><td>Example song C, Hard</td><td>Max</td><td class="num">100.0%</td><td class="num">844</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td class="num">+0.1</td></tr>
+                  <tr><td class="mono">20 Nov 19:05</td><td>Example song A, Hard</td><td>Match friend</td><td class="num">94.1%</td><td class="num">570</td><td class="num">66</td><td class="num">18</td><td class="num">11</td><td class="num">-0.6</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="hist-empty" class="empty" hidden>
+              <h3>No songs yet</h3>
+              <p class="small muted">Each song you play while arrowhead is armed lands here with its judgments and timing drift.</p>
+              <button class="btn" data-goto="s-live">Open live view</button>
+            </div>
+          </section>
+
+          <!-- SETTINGS -->
+          <section class="screen drawer-only" id="s-settings" aria-labelledby="h-settings">
+            <div class="screen-head">
+              <div><h2 id="h-settings">Settings</h2><p>Saved to <span class="mono">~/.config/arrowhead/config.toml</span>.</p></div>
+              <button class="btn drawer-close" data-close>Close</button>
+            </div>
+            <div class="settings-grid">
+              <div class="panel">
+                <div class="panel-head"><h3>Play</h3></div>
+                <div class="panel-body set-list">
+                  <div class="row"><div class="row-text"><span class="small">Arm automatically</span><p>Starts when receptors appear, stops on the results screen.</p></div><label class="switch"><input type="checkbox" checked aria-label="Arm automatically"><span></span></label></div>
+                  <div class="row"><div class="row-text"><span class="small">Only press when the game is focused</span><p>Keeps keys out of other windows.</p></div><label class="switch"><input type="checkbox" checked aria-label="Focus guard"><span></span></label></div>
+                  <div class="row"><div class="row-text"><span class="small">Dry run</span><p>Detects and times everything, presses nothing.</p></div><label class="switch"><input type="checkbox" aria-label="Dry run"><span></span></label></div>
+                  <div class="row"><div class="row-text"><span class="small">Read the in-game ms popup</span><p>Turn on the ms display in Funky Friday first.</p></div><label class="switch"><input type="checkbox" checked aria-label="Read ms popup"><span></span></label></div>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="panel-head"><h3>Hotkeys</h3><span class="note">proposed defaults</span></div>
+                <div class="panel-body">
+                  <div class="hotkeys">
+                    <span>Start or pause</span><span class="keys"><kbd>F8</kbd></span>
+                    <span>Panic, release all keys</span><span class="keys"><kbd>F12</kbd></span>
+                    <span>Target up, down 0.5%</span><span class="keys"><kbd>F9</kbd><kbd>F10</kbd></span>
+                    <span>Next preset</span><span class="keys"><kbd>F7</kbd></span>
+                    <span>Debug overlay</span><span class="keys"><kbd>F6</kbd></span>
+                  </div>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="panel-head"><h3>Capture and overlay</h3></div>
+                <div class="panel-body set-list">
+                  <div class="row"><div class="row-text"><span class="small">Backend</span><p>Windows uses Graphics Capture, then DXGI.</p></div><select aria-label="Capture backend"><option>PipeWire portal</option></select></div>
+                  <div class="row"><div class="row-text"><span class="small">Capture rate</span><p>Lane strips only, at monitor refresh.</p></div><select aria-label="Capture rate"><option>Monitor refresh</option><option>120 fps</option><option>60 fps</option></select></div>
+                  <div class="row"><div class="row-text"><span class="small">Click-through overlay</span><p>Draws lane strips and timings over the game.</p></div><label class="switch"><input type="checkbox" aria-label="Overlay"><span></span></label></div>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="panel-head"><h3>App</h3></div>
+                <div class="panel-body set-list">
+                  <div class="row"><div class="row-text"><span class="small">Check for updates on launch</span><p>The only network request arrowhead makes.</p></div><label class="switch"><input type="checkbox" checked aria-label="Update check"><span></span></label></div>
+                  <div class="row"><div class="row-text"><span class="small">Log level</span><p>Files rotate in the data folder.</p></div><select aria-label="Log level"><option>info</option><option>debug</option><option>trace</option></select></div>
+                  <div class="row"><div class="row-text"><span class="small">Diagnostics</span><p>Versions, backend, recent log lines.</p></div><button class="btn" id="copy-diag">Copy diagnostics</button></div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GUI STACK ============ -->
+  <section class="view doc" id="v-stack" role="tabpanel" aria-labelledby="t-stack" hidden>
+    <div class="verdict" id="stack-verdict">
+      <h2>Recommendation: Tauri 2 with a web front end</h2>
+      <p>The engine runs on its own Rust threads, so webview hiccups cannot touch press timing. The UI in this review is web, and Hallmark designs for the web, so these mockups carry straight over. If webkit2gtk becomes painful on Linux, the same front end moves to a local server in a browser with no rewrite. The click-through overlay is a separate small process (layer-shell on Wayland, a layered topmost window on Windows), because Tauri windows cannot do per-region click-through.</p>
+      <p>Front end: React and TypeScript lets v2's pages be read across. Svelte 5 is lighter. Both are fine.</p>
+    </div>
+    <div class="table-wrap">
+      <table class="compare">
+        <thead><tr><th>Option</th><th>Looks</th><th>Live charts</th><th>Linux deps</th><th>Windows build in CI</th><th>Binary</th><th>Main risk</th></tr></thead>
+        <tbody id="stack-rows">
+          <tr class="pick"><td>Tauri 2 (2.12) + web UI</td><td>Anything CSS can do; matches this review</td><td>Canvas at 60 fps is fine; engine is off the UI thread</td><td>webkit2gtk-4.1 (present on your machine)</td><td>Native runner per OS, tauri-action</td><td>Small, uses system webview</td><td>WebKitGTK quirks on Wayland and NVIDIA</td></tr>
+          <tr><td>egui 0.37 + egui_plot</td><td>Plain, tool-like, hard to make refined</td><td>Excellent, redraws every frame</td><td>None beyond GL or Vulkan</td><td>Native runner per OS</td><td>Single binary</td><td>Looks generic; Hallmark does not apply; full UI rewrite</td></tr>
+          <tr><td>iced</td><td>Clean, custom widgets take work</td><td>Good with canvas widget</td><td>None beyond wgpu</td><td>Native runner per OS</td><td>Single binary</td><td>API still moving between releases; research advises skipping</td></tr>
+          <tr><td>Slint</td><td>Polished, own markup language</td><td>Good</td><td>None</td><td>Native runner per OS</td><td>Single binary</td><td>Licence terms to read; smaller ecosystem; research advises skipping</td></tr>
+          <tr><td>Local web UI in a browser</td><td>Same as Tauri</td><td>Same as Tauri</td><td>None, any browser</td><td>Trivial</td><td>Small</td><td>Feels like two apps; a local port to secure; no native window or tray</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note" id="stack-note">Versions checked on crates.io, 21 Nov 2026. Linux builds cannot be cross-compiled sensibly (the pipewire crate needs system headers), so CI builds each OS on its own runner.</p>
+  </section>
+
+  <!-- ============ LOGO ============ -->
+  <section class="view doc" id="v-logo" role="tabpanel" aria-labelledby="t-logo" hidden>
+    <div class="screen-head"><div><h2>Logo options</h2><p class="muted small">Click one to mark it. Each is shown as an app tile, at 24 and 16 px, and with the wordmark.</p></div><span class="pill" id="logo-pick">None marked</span></div>
+    <div class="logos" id="logos"></div>
+  </section>
+
+  <!-- ============ DECISIONS ============ -->
+  <section class="view doc" id="v-spec" role="tabpanel" aria-labelledby="t-spec" hidden>
+    <div class="doc-grid">
+      <div class="panel"><div class="panel-head"><h3>Identity</h3></div>
+        <dl class="facts">
+          <dt>Name</dt><dd>arrowhead</dd><dt>Licence</dt><dd>MIT</dd><dt>Repo</dt><dd>~/GitHub/arrowhead, public on GitHub</dd><dt>Look</dt><dd>Clean tool, dark only, Hallmark Console palette</dd><dt>Tone</dt><dd>Straight, technical</dd><dt>v2</dt><dd>Archived once arrowhead exists</dd>
+        </dl></div>
+      <div class="panel"><div class="panel-head"><h3>Stack</h3></div>
+        <dl class="facts">
+          <dt>Core</dt><dd>Rust, Cargo workspace: core, capture, input, app, cli</dd><dt>GUI</dt><dd>Tauri 2, React and TypeScript, overlay as a separate process</dd><dt>Layout</dt><dd>Layout 1: sidebar and pages</dd><dt>Logo</dt><dd>Receptor</dd><dt>Linux capture</dt><dd>Portal ScreenCast over PipeWire</dd><dt>Windows capture</dt><dd>DXGI first; Graphics Capture as the per-window option and fallback</dd><dt>Input</dt><dd>uinput on Linux, SendInput scan codes on Windows</dd><dt>Config</dt><dd>TOML in the OS config folder</dd><dt>Builds</dt><dd>GitHub Actions, Linux and Windows</dd>
+        </dl></div>
+      <div class="panel"><div class="panel-head"><h3>Detection and timing</h3></div>
+        <dl class="facts">
+          <dt>Vision</dt><dd>Classic CV on lane strips above each receptor</dd><dt>Text</dt><dd>Glyph templates for digits and judgments, OCR for song titles</dd><dt>Timing</dt><dd>Predictive: track notes, fit scroll speed, press at the crossing</dd><dt>Latency</dt><dd>Auto-calibrated, plus in-game ms readback</dd><dt>Extras</dt><dd>Lookahead, readback, adaptive colours, sub-frame, hold ends, speed changes</dd><dt>Modes</dt><dd>4K, holds, both scroll directions, side detected</dd><dt>Arming</dt><dd>Receptors appear, results screen ends it</dd>
+        </dl></div>
+      <div class="panel"><div class="panel-head"><h3>Play style</h3></div>
+        <dl class="facts">
+          <dt>Model</dt><dd>Player profile steered by a target-accuracy controller</dd><dt>UI</dt><dd>Target and presets up front, advanced drawer</dd><dt>Perfect</dt><dd>Preset called Max</dd><dt>Friends</dt><dd>Match mode reads the opponent's score live</dd><dt>Dropped</dt><dd>v2 curve, Computer Mode, AVX2 path</dd>
+        </dl></div>
+      <div class="panel"><div class="panel-head"><h3>Safety and controls</h3></div>
+        <dl class="facts">
+          <dt>Keys</dt><dd>A S W D or arrows, both accepted by the game</dd><dt>Hotkeys</dt><dd>Toggle, accuracy nudge, panic, preset cycle</dd><dt>Guards</dt><dd>Focus guard, stuck-key watchdog, release on exit or crash, dry run</dd><dt>Displays</dt><dd>Two monitors first; one monitor gets the overlay</dd><dt>Network</dt><dd>Update check only, no telemetry</dd>
+        </dl></div>
+      <div class="panel"><div class="panel-head"><h3>Process</h3></div>
+        <dl class="facts">
+          <dt>v0.1</dt><dd>Linux MVP: detection, timing, Max, basic UI</dd><dt>Before v0.1</dt><dd>One private-server session to record clips and confirm the game facts below</dd><dt>v0.2</dt><dd>Windows and the player model</dd><dt>Tests</dt><dd>Synthetic frames, recorded clips, model statistics, CI on both OSes</dd><dt>Git</dt><dd>Conventional commits, PR per milestone, release-please</dd><dt>Ship</dt><dd>GitHub Releases, AUR arrowhead-bin, one-click updates</dd><dt>Docs</dt><dd>README, ARCHITECTURE, CLAUDE.md, CONTRIBUTING, vision docs</dd>
+        </dl></div>
+      <div class="panel"><div class="panel-head"><h3>Research: the game</h3><span class="note">community sources, unverified</span></div>
+        <dl class="facts">
+          <dt>Judgments</dt><dd>Five tiers: Sick, Good, Ok, Bad, Miss. Bad was missing from v2</dd><dt>Windows</dt><dd>About 45, 80, 130, 230 ms. No sign of a 2026 change</dd><dt>ms popup</dt><dd>Exists: a signed readout such as -5.59 ms under the judgment, in a bottom corner of the playfield</dd><dt>HUD</dt><dd>Scores top left and right, accuracy and combo bottom centre, title and difficulty top centre</dd><dt>Skins</dt><dd>Players can change arrow style and colours, so colours are learned per profile</dd><dt>Accuracy formula</dt><dd class="open-q">Unknown. Measure from results screens</dd><dt>Default keys</dt><dd class="open-q">A S W D plus arrows not confirmed by any source; check in game</dd>
+        </dl></div>
+      <div class="panel"><div class="panel-head"><h3>Research: risks</h3></div>
+        <dl class="facts">
+          <dt>Sober FPS</dt><dd class="open-q">Open Sober issue 2027: 16 fps while focused on KDE Plasma 6 Wayland on CachyOS, your exact setup. Test before anything else</dd><dt>Sober input</dt><dd>Open issues with no keyboard input after launch (1959, 1940, 973)</dd><dt>Region capture</dt><dd>Neither KDE nor Hyprland portals crop to a region; arrowhead crops on the CPU, as v2 does</dd><dt>Overlay</dt><dd>Whether a layer-shell overlay shows above a fullscreen game on KWin needs a spike</dd><dt>Windows</dt><dd>Whether Roblox's anti-cheat on Windows blocks synthetic input or capture is unknown</dd>
+        </dl></div>
+      <div class="panel"><div class="panel-head"><h3>Research: worth taking</h3></div>
+        <dl class="facts">
+          <dt>Prior art</dt><dd>Existing Funky Friday bots sample fixed pixels at one resolution, with no holds and no humanizing. arrowhead's design already avoids their failures</dd><dt>Self-check</dt><dd>Score arrowhead's own output with unstable rate (osu!'s spread measure, via circleguard) so a preset never reads as uniform jitter</dd><dt>Text</dt><dd>Template matching for digits on the scan thread; ocrs only off the hot path</dd><dt>Focus guard</dt><dd>KWin script on KDE, IPC socket on Hyprland, foreground window on Windows</dd><dt>Input fallback</dt><dd>libei through the RemoteDesktop portal if uinput is not writable</dd><dt>Latency test</dt><dd>A test window that flips a pixel on key press, timed through the same capture path</dd>
+        </dl></div>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+  const app = $('#app');
+  app.classList.add('js');
+
+  // review tabs
+  const views = { proto: '#v-proto', stack: '#v-stack', logo: '#v-logo', spec: '#v-spec' };
+  function showView(v) {
+    if (!views[v]) v = 'proto';
+    $$('.tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.view === v)));
+    Object.entries(views).forEach(([k, s]) => { $(s).hidden = k !== v; });
+    if (v === 'proto') sizeCanvases();
+  }
+  $$('.tab').forEach(t => t.addEventListener('click', () => { location.hash = t.dataset.view; }));
+  addEventListener('hashchange', () => showView(location.hash.slice(1)));
+
+  // layout switch
+  function setLayout(l) {
+    app.dataset.layout = l;
+    $$('[data-layout]', $('.proto-bar')).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.layout === l)));
+    closeDrawer();
+    if (l === 'a') goto(current);
+    store.set('ah-layout', l);
+    requestAnimationFrame(sizeCanvases);
+  }
+  $$('.proto-bar [data-layout]').forEach(b => b.addEventListener('click', () => setLayout(b.dataset.layout)));
+
+  // layout A navigation
+  let current = 's-live';
+  function goto(id) {
+    if (app.dataset.layout === 'b') { if (id === 's-live' || id === 's-style') { closeDrawer(); return; } openDrawer(id); return; }
+    current = id;
+    $$('.screen').forEach(s => s.classList.toggle('active', s.id === id));
+    $$('.side button').forEach(b => b.toggleAttribute('aria-current', b.dataset.screen === id) || b.dataset.screen === id && b.setAttribute('aria-current', 'page'));
+    $$('.side button').forEach(b => { if (b.dataset.screen === id) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
+    requestAnimationFrame(sizeCanvases);
+  }
+  $$('.side button').forEach(b => b.addEventListener('click', () => goto(b.dataset.screen)));
+  $$('[data-goto]').forEach(b => b.addEventListener('click', () => goto(b.dataset.goto)));
+  addEventListener('keydown', e => {
+    if (e.target.matches('input, select, textarea') || $('#v-proto').hidden) return;
+    const map = { '1': 's-live', '2': 's-style', '3': 's-setup', '4': 's-history', '5': 's-settings' };
+    if (map[e.key] && app.dataset.layout === 'a') goto(map[e.key]);
+    if (e.key === 'Escape') closeDrawer();
+  });
+
+  // layout B drawer
+  let scrim = null, lastFocus = null;
+  function openDrawer(id) {
+    closeDrawer();
+    lastFocus = document.activeElement;
+    const s = $('#' + id); s.classList.add('drawer-open');
+    scrim = document.createElement('div'); scrim.className = 'scrim'; scrim.addEventListener('click', closeDrawer); document.body.append(scrim);
+    $('.drawer-close', s)?.focus();
+  }
+  function closeDrawer() {
+    $$('.screen.drawer-open').forEach(s => s.classList.remove('drawer-open'));
+    scrim?.remove(); scrim = null;
+    lastFocus?.focus?.(); lastFocus = null;
+  }
+  $$('[data-drawer]').forEach(b => b.addEventListener('click', () => openDrawer(b.dataset.drawer)));
+  $$('[data-close]').forEach(b => b.addEventListener('click', closeDrawer));
+
+  // setup wizard
+  let step = 0; const wiz = $$('.wiz'); const steps = $$('#steps li');
+  function setStep(n) {
+    step = Math.max(0, Math.min(wiz.length - 1, n));
+    wiz.forEach((w, i) => w.hidden = i !== step);
+    steps.forEach((li, i) => { li.className = i < step ? 'done' : i === step ? 'current' : ''; });
+    $('#wiz-back').disabled = step === 0;
+    $('#wiz-next').textContent = step === wiz.length - 1 ? 'Finish' : 'Next';
+  }
+  $('#wiz-back').addEventListener('click', () => setStep(step - 1));
+  $('#wiz-next').addEventListener('click', () => { if (step === wiz.length - 1) { setStep(0); goto('s-live'); } else setStep(step + 1); });
+  $$('.seg, .monitors').forEach(g => { if (g.closest('.proto-bar') || g.dataset.static) return; $$('button', g).forEach(b => b.addEventListener('click', () => { if (b.dataset.layout) return; $$('button', g).forEach(x => x.setAttribute('aria-pressed', String(x === b))); if (b.dataset.hist) { $('#hist-full').hidden = b.dataset.hist !== 'full'; $('#hist-empty').hidden = b.dataset.hist !== 'empty'; } })); });
+  setStep(0);
+
+  // humanizer model
+  const W = { sick: 45, good: 80, ok: 130, bad: 230 };
+  const PRESETS = {
+    max:    { name: 'Max', target: 100, bias: 0, spread: 100, chord: 0, jack: 0, fat: 0, drift: 0, miss: 0, rel: 0 },
+    sweaty: { name: 'Sweaty', target: 96, bias: 3, spread: 100, chord: 30, jack: 40, fat: 20, drift: 15, miss: 4, rel: 18 },
+    casual: { name: 'Casual friend', target: 88, bias: 6, spread: 120, chord: 60, jack: 75, fat: 45, drift: 35, miss: 15, rel: 35 },
+    rusty:  { name: 'Rusty', target: 84, bias: 14, spread: 110, chord: 50, jack: 55, fat: 70, drift: 50, miss: 10, rel: 40 }
+  };
+  const ids = ['bias', 'spread', 'chord', 'jack', 'fat', 'drift', 'miss', 'rel'];
+  let preset = 'sweaty';
+  const erf = x => { const s = Math.sign(x); x = Math.abs(x); const t = 1 / (1 + 0.3275911 * x); const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x); return s * y; };
+  const cdf = (x, m, sd) => 0.5 * (1 + erf((x - m) / (sd * Math.SQRT2)));
+  function model() {
+    const T = +$('#target').value;
+    const p = Object.fromEntries(ids.map(k => [k, +$('#a-' + k).value]));
+    const max = preset === 'max';
+    const base = max ? 0.8 : 3 + (100 - T) * 3.6;
+    const sd = Math.max(0.5, base * (p.spread / 100) * (1 + (p.chord + p.jack) / 400 + p.fat / 400 + p.drift / 600));
+    const m = p.bias;
+    const inW = w => cdf(w, m, sd) - cdf(-w, m, sd);
+    const floor = p.miss / 1000;
+    const sick = inW(W.sick), good = inW(W.good) - sick, ok = inW(W.ok) - inW(W.good), bad = inW(W.bad) - inW(W.ok), miss = 1 - inW(W.bad);
+    const k = 1 - floor;
+    return { sd, m, sick: sick * k, good: good * k, ok: ok * k, bad: bad * k, miss: miss * k + floor, p, T };
+  }
+  const pct = v => (v * 100).toFixed(v > 0.995 || v < 0.001 ? 1 : 1) + '%';
+  let dist = model();
+  function renderStyle() {
+    dist = model();
+    $('#target-out').textContent = (+$('#target').value).toFixed(1) + '%';
+    const o = { bias: v => (v >= 0 ? '+' : '') + v + ' ms', spread: v => (v / 100).toFixed(2) + 'x', chord: v => (v / 100).toFixed(2), jack: v => (v / 100).toFixed(2), fat: v => (v / 100).toFixed(2), drift: v => (v / 100).toFixed(2), miss: v => (v / 10).toFixed(1) + '%', rel: v => v + ' ms' };
+    ids.forEach(k => { $('#o-' + k).textContent = o[k](+$('#a-' + k).value); });
+    [['sick', dist.sick], ['good', dist.good], ['ok', dist.ok], ['bad', dist.bad], ['miss', dist.miss]].forEach(([k, v]) => {
+      $('#d-' + k).textContent = pct(v);
+      const bar = $('#db-' + k); bar.style.flexGrow = String(Math.max(v, 0)); bar.style.background = `var(--judge-${k})`;
+      const tg = $('#tg-' + k); if (tg) tg.textContent = 'target ' + pct(v);
+    });
+    drawCurve();
+    const name = PRESETS[preset]?.name ?? 'Custom';
+    $('#st-preset').textContent = `Preset: ${name}, ${(+$('#target').value).toFixed(1)}%`;
+    $('#acc-target').textContent = (+$('#target').value).toFixed(1) + '%';
+  }
+  function drawCurve() {
+    const svg = $('#curve'); const w = 300, h = 120, R = 240;
+    const x = ms => (ms + R) / (2 * R) * w;
+    let bands = '';
+    [['bad', W.bad], ['ok', W.ok], ['good', W.good], ['sick', W.sick]].forEach(([k, ms]) => {
+      bands += `<rect x="${x(-ms)}" y="0" width="${x(ms) - x(-ms)}" height="${h}" style="fill: var(--judge-${k}); opacity: 0.12"/>`;
+    });
+    const pts = []; let peak = 0; const ys = [];
+    for (let i = 0; i <= 120; i++) { const ms = -R + i * (2 * R / 120); const y = Math.exp(-0.5 * ((ms - dist.m) / dist.sd) ** 2); ys.push([ms, y]); peak = Math.max(peak, y); }
+    ys.forEach(([ms, y]) => pts.push(`${x(ms).toFixed(1)},${(h - 6 - (y / peak) * (h - 16)).toFixed(1)}`));
+    svg.innerHTML = bands + `<line x1="${x(0)}" x2="${x(0)}" y1="0" y2="${h}" style="stroke: var(--color-rule-2)" stroke-width="1"/>` +
+      `<polygon points="${x(-R)},${h} ${pts.join(' ')} ${x(R)},${h}" style="fill: var(--color-accent); opacity: 0.18"/>` +
+      `<polyline points="${pts.join(' ')}" fill="none" style="stroke: var(--color-accent)" stroke-width="1.5"/>`;
+  }
+  function applyPreset(k) {
+    preset = k; const p = PRESETS[k];
+    $('#target').value = p.target; ids.forEach(i => { $('#a-' + i).value = p[i]; });
+    $$('.preset').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.preset === k)));
+    renderStyle(); resetSim();
+  }
+  $$('.preset').forEach(b => b.addEventListener('click', () => applyPreset(b.dataset.preset)));
+  ['#target', ...ids.map(i => '#a-' + i)].forEach(s => $(s).addEventListener('input', () => {
+    preset = (preset === 'max' && +$('#target').value === 100) ? 'max' : 'custom';
+    $$('.preset').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.preset === preset)));
+    renderStyle();
+  }));
+  $('#match').addEventListener('change', e => { $('#match-margin').hidden = !e.target.checked; });
+  $('#margin').addEventListener('input', e => { const v = +e.target.value; $('#margin-out').textContent = (v >= 0 ? '+' : '') + v.toFixed(2) + '%'; });
+
+  // live simulation
+  const lanesC = $('#lanes'), hitC = $('#hiterr');
+  function sizeCanvases() {
+    [lanesC, hitC].forEach(c => { const r = c.getBoundingClientRect(); if (!r.width) return; const d = devicePixelRatio || 1; c.width = Math.round(r.width * d); c.height = Math.round(r.height * d); });
+    drawLanes(performance.now()); drawHit();
+  }
+  addEventListener('resize', sizeCanvases);
+  let notes = [], hits = [], counts, playing = true, dry = false, lastSpawn = 0, songT = 0, flashes = [0, 0, 0, 0];
+  function resetSim() { notes = []; hits = []; counts = { sick: 0, good: 0, ok: 0, bad: 0, miss: 0 }; updateCounts(); }
+  function gauss() { let u = 0, v = 0; while (!u) u = Math.random(); while (!v) v = Math.random(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+  const SPEED = 0.42; // px per ms at 440px height, a stand-in for fitted scroll speed
+  function spawn(now) {
+    const lanes = Math.random() < 0.18 ? [0, 1, 2, 3].sort(() => Math.random() - 0.5).slice(0, 2) : [Math.floor(Math.random() * 4)];
+    lanes.forEach(l => { const hold = Math.random() < 0.12 ? 180 + Math.random() * 320 : 0; notes.push({ l, t: now + 1100, hold, judged: false }); });
+  }
+  function judge(n) {
+    if (dry) return;
+    let err = dist.m + gauss() * dist.sd, k;
+    if (Math.random() < dist.p.miss / 1000) k = 'miss';
+    else { const a = Math.abs(err); k = a <= W.sick ? 'sick' : a <= W.good ? 'good' : a <= W.ok ? 'ok' : a <= W.bad ? 'bad' : 'miss'; }
+    counts[k]++; if (k !== 'miss') hits.push({ err, k, at: performance.now() }); if (hits.length > 40) hits.shift();
+    flashes[n.l] = performance.now(); updateCounts();
+  }
+  function updateCounts() {
+    ['sick', 'good', 'ok', 'bad', 'miss'].forEach(k => { $('#c-' + k).textContent = counts[k]; });
+    const tot = counts.sick + counts.good + counts.ok + counts.bad + counts.miss;
+    // shortcut: weights are placeholders until the real Funky Friday accuracy formula is confirmed
+    const acc = tot ? (counts.sick * 1 + counts.good * 0.9 + counts.ok * 0.6 + counts.bad * 0.3) / tot * 100 : 100;
+    $('#acc').textContent = acc.toFixed(2) + '%';
+    if (hits.length) { const mean = hits.reduce((a, h) => a + h.err, 0) / hits.length; const sd = Math.sqrt(hits.reduce((a, h) => a + (h.err - mean) ** 2, 0) / hits.length); $('#hit-mean').textContent = (mean >= 0 ? '+' : '') + mean.toFixed(1) + ' ms'; $('#hit-sd').textContent = sd.toFixed(1) + ' ms'; }
+  }
+  function drawLanes(now) {
+    const c = lanesC, g = c.getContext('2d'); if (!c.width) return;
+    const d = devicePixelRatio || 1, w = c.width / d, h = c.height / d; g.setTransform(d, 0, 0, d, 0, 0);
+    g.fillStyle = css('--color-paper-3'); g.fillRect(0, 0, w, h);
+    const lw = w / 4, ry = h - 52, size = Math.min(lw * 0.62, 44), cols = ['--lane-1', '--lane-2', '--lane-3', '--lane-4'].map(css);
+    g.strokeStyle = css('--color-rule'); g.lineWidth = 1;
+    for (let i = 1; i < 4; i++) { g.beginPath(); g.moveTo(i * lw + 0.5, 0); g.lineTo(i * lw + 0.5, h); g.stroke(); }
+    for (let i = 0; i < 4; i++) {
+      const cx = i * lw + lw / 2, lit = now - flashes[i] < 90;
+      g.globalAlpha = lit ? 0.9 : 0.35; g.strokeStyle = cols[i]; g.lineWidth = 2;
+      roundRect(g, cx - size / 2, ry - size / 2, size, size, 8); g.stroke(); g.globalAlpha = 1;
+    }
+    notes.forEach(n => {
+      const dy = (n.t - now) * SPEED, y = ry - dy, cx = n.l * lw + lw / 2;
+      if (n.hold) { const len = n.hold * SPEED; g.fillStyle = cols[n.l]; g.globalAlpha = 0.35; g.fillRect(cx - size * 0.14, Math.min(y, ry) - len + (y > ry ? (y - ry) : 0), size * 0.28, Math.max(0, len - Math.max(0, y - ry))); g.globalAlpha = 1; }
+      if (y < ry + 2 || !n.judged) { g.fillStyle = cols[n.l]; roundRect(g, cx - size / 2, y - size / 2, size, size, 8); g.fill(); }
+    });
+    g.fillStyle = css('--color-muted'); g.font = `11px ${css('--font-mono')}`; g.fillText(dry ? 'dry run, no keys sent' : 'strip scan, predicted crossings', 10, 18);
+  }
+  function roundRect(g, x, y, w, h, r) { g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r); g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath(); }
+  function drawHit() {
+    const c = hitC, g = c.getContext('2d'); if (!c.width) return;
+    const d = devicePixelRatio || 1, w = c.width / d, h = c.height / d; g.setTransform(d, 0, 0, d, 0, 0);
+    g.clearRect(0, 0, w, h); const R = 240, x = ms => (ms + R) / (2 * R) * w;
+    [['--judge-bad', W.bad], ['--judge-ok', W.ok], ['--judge-good', W.good], ['--judge-sick', W.sick]].forEach(([t, ms]) => { g.fillStyle = css(t); g.globalAlpha = 0.16; g.fillRect(x(-ms), h * 0.35, x(ms) - x(-ms), h * 0.3); });
+    g.globalAlpha = 1; g.fillStyle = css('--color-rule-2'); g.fillRect(x(0) - 0.5, 0, 1, h);
+    const now = performance.now();
+    hits.forEach(hh => { const age = Math.min(1, (now - hh.at) / 6000); g.globalAlpha = 1 - age * 0.8; g.fillStyle = css('--judge-' + hh.k); g.fillRect(x(hh.err) - 1, h * 0.15, 2, h * 0.7); });
+    if (hits.length) { const mean = hits.reduce((a, b) => a + b.err, 0) / hits.length; g.globalAlpha = 1; g.fillStyle = css('--color-accent'); g.beginPath(); g.moveTo(x(mean) - 6, 0); g.lineTo(x(mean) + 6, 0); g.lineTo(x(mean), 8); g.closePath(); g.fill(); }
+    g.globalAlpha = 1;
+  }
+  // sparklines
+  const series = { fps: [], lat: [], jit: [], off: [] };
+  function spark(id, arr, lo, hi, tok) { const el = $('#' + id); el.setAttribute('points', arr.map((v, i) => `${(i / 39 * 100).toFixed(1)},${(22 - (v - lo) / (hi - lo) * 20).toFixed(1)}`).join(' ')); el.style.stroke = `var(${tok})`; }
+  function tickMetrics() {
+    const fps = 165 + (Math.random() - 0.5) * 1.2, lat = 7.6 + Math.random() * 0.8, jit = 0.3 + Math.random() * 0.25, off = -11 + Math.round((Math.random() - 0.5) * 1.2);
+    [[series.fps, fps], [series.lat, lat], [series.jit, jit], [series.off, off]].forEach(([a, v]) => { a.push(v); if (a.length > 40) a.shift(); });
+    $('#m-fps').textContent = fps.toFixed(0) + ' fps'; $('#m-lat').textContent = lat.toFixed(1) + ' ms'; $('#m-jit').textContent = jit.toFixed(2) + ' ms'; $('#m-off').textContent = off + ' ms';
+    spark('sp-fps', series.fps, 160, 170, '--color-cool'); spark('sp-lat', series.lat, 6, 10, '--color-cool'); spark('sp-jit', series.jit, 0, 1, '--color-cool'); spark('sp-off', series.off, -14, -8, '--color-accent');
+  }
+  for (let i = 0; i < 40; i++) tickMetrics();
+  let lastMetric = 0;
+  function frame(now) {
+    if (playing && !$('#v-proto').hidden) {
+      if (now - lastSpawn > 170 + Math.random() * 260) { spawn(now); lastSpawn = now; }
+      notes.forEach(n => { if (!n.judged && now >= n.t) { n.judged = true; judge(n); } });
+      notes = notes.filter(n => now - n.t - n.hold < 300);
+      drawLanes(now); drawHit();
+      if (now - lastMetric > 250) { tickMetrics(); lastMetric = now; }
+    }
+    requestAnimationFrame(frame);
+  }
+  $('#btn-toggle').addEventListener('click', e => { playing = !playing; e.target.textContent = playing ? 'Pause' : 'Resume'; const st = $('#st-state'); st.textContent = playing ? 'Playing' : 'Armed, paused'; st.className = 'pill ' + (playing ? 'live' : 'armed'); });
+  $('#btn-panic').addEventListener('click', () => { playing = false; $('#btn-toggle').textContent = 'Resume'; const st = $('#st-state'); st.textContent = 'Stopped, keys released'; st.className = 'pill bad'; });
+  $('#btn-dry').addEventListener('click', e => { dry = !dry; e.target.setAttribute('aria-pressed', String(dry)); e.target.textContent = dry ? 'Dry run on' : 'Dry run'; });
+  $('#copy-diag').addEventListener('click', async e => { const t = 'arrowhead 0.1.0 (example)\nbackend: pipewire-portal\nos: linux'; try { await navigator.clipboard.writeText(t); e.target.textContent = 'Copied'; } catch { e.target.textContent = 'Copy not allowed here'; } setTimeout(() => e.target.textContent = 'Copy diagnostics', 1600); });
+
+  // logos
+  const LOGOS = [
+    { id: 'spear', name: 'Spearhead', note: 'One sharp glyph. Reads at 16 px, works in one colour.', svg: '<path class="acc-fill" d="M12 2 21 20 12 15.5 3 20Z"/>' },
+    { id: 'receptor', name: 'Receptor', note: 'An up arrow drawn as the game\'s receptor outline, with the hit line through it.', svg: '<path d="M12 3 20 11h-5v9H9v-9H4Z" fill="none" stroke-width="1.8" stroke-linejoin="round" class="ink-stroke"/><path d="M2 14.5h20" stroke-width="1.8" class="acc-stroke"/>' },
+    { id: 'four', name: 'Four lanes', note: 'The four arrows set as a compass. Ties to the game, busier when small.', svg: '<path class="l3" d="M12 1.5 16 6h-8Z"/><path class="l2" d="M12 22.5 8 18h8Z"/><path class="l1" d="M1.5 12 6 8v8Z"/><path class="l4" d="M22.5 12 18 16V8Z"/><circle cx="12" cy="12" r="2.2" class="acc-fill"/>' },
+    { id: 'tick', name: 'Arrow on the beat', note: 'An arrowhead resting on a timing tick, the thing arrowhead is about.', svg: '<path class="ink-fill" d="M12 3 19 15 12 12 5 15Z"/><path d="M3 19.5h18" stroke-width="1.5" class="rule-stroke"/><path d="M12 17v5" stroke-width="2" class="acc-stroke"/>' },
+    { id: 'cut', name: 'Cut a', note: 'A lowercase a cut by an arrow, as a monogram.', svg: '<path d="M16.5 9.5v9.5M16.5 13.8a4.5 4.5 0 1 1 0-1.6" fill="none" stroke-width="2.2" stroke-linecap="round" class="ink-stroke"/><path class="acc-fill" d="M17.5 2.5 21 8.5h-7Z"/>' },
+    { id: 'notch', name: 'Notched chevron', note: 'A chevron with a gap at the hit point. Quiet, tool-like.', svg: '<path d="M4 17 12 5l8 12" fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" class="ink-stroke"/><path d="M9.5 17h5" stroke-width="2.6" stroke-linecap="round" class="acc-stroke"/>' }
+  ];
+  const logoBox = $('#logos'); const savedLogo = store.get('ah-logo');
+  LOGOS.forEach(L => {
+    const b = document.createElement('button'); b.className = 'logo-card'; b.dataset.id = L.id; b.setAttribute('aria-pressed', String(savedLogo === L.id));
+    const s = `<svg viewBox="0 0 24 24" aria-hidden="true">${L.svg}</svg>`;
+    b.innerHTML = `<div class="logo-stage"><span class="logo-tile">${s}</span><span class="logo-sm"><span>${s}</span><span class="tiny">${s}</span></span></div><span class="logo-word">${s}arrowhead</span><div><b>${L.name}</b><p>${L.note}</p></div>`;
+    b.addEventListener('click', () => { $$('.logo-card').forEach(x => x.setAttribute('aria-pressed', String(x === b))); store.set('ah-logo', L.id); $('#logo-pick').textContent = 'Marked: ' + L.name; $('#logo-pick').className = 'pill armed'; });
+    logoBox.append(b);
+  });
+  if (savedLogo) { const L = LOGOS.find(l => l.id === savedLogo); if (L) { $('#logo-pick').textContent = 'Marked: ' + L.name; $('#logo-pick').className = 'pill armed'; } }
+
+  // boot
+  resetSim(); applyPreset('sweaty');
+  setLayout(store.get('ah-layout') === 'b' ? 'b' : 'a');
+  showView(location.hash.slice(1));
+  if (reduce) { playing = false; $('#btn-toggle').textContent = 'Resume'; }
+  requestAnimationFrame(frame);
+})();
+</script>
