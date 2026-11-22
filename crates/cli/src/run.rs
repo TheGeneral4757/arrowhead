@@ -11,7 +11,7 @@ use arrowhead_core::detect::calib::{
 use arrowhead_core::detect::{DetectConfig, Detector, Layout};
 use arrowhead_core::engine::Engine;
 use arrowhead_core::frame::{FrameSource, FrameView, OwnedFrame};
-use arrowhead_core::input::{FocusProbe, KeySink, NullSink, key_names};
+use arrowhead_core::input::{KeySink, NullSink, key_names};
 use arrowhead_core::plan::{Cmd, PlanConfig};
 use arrowhead_core::runtime::platform::make_realtime;
 use arrowhead_core::sched::{SchedEvent, Scheduler};
@@ -292,6 +292,7 @@ fn start_focus(
     focus: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
 ) -> Result<Option<std::thread::JoinHandle<()>>, Box<dyn std::error::Error>> {
+    use arrowhead_core::input::FocusProbe;
     match arrowhead_input::kwin::KwinProbe::start(cfg.safety.game_window_classes.clone()) {
         Ok(mut probe) => Ok(Some(std::thread::spawn(move || {
             while !stop.load(Ordering::SeqCst) {
@@ -323,6 +324,7 @@ fn start_focus(
 /// `focus`: print the active window class as the KWin probe sees it (checks P5).
 #[cfg(target_os = "linux")]
 pub fn focus(seconds: f32) -> Res {
+    use arrowhead_core::input::FocusProbe;
     let cfg: Config = config_dir()
         .map(|d| load_toml(&d.join("config.toml")))
         .transpose()?
