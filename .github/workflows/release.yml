@@ -108,7 +108,79 @@ jobs:
           printf '\n---\nMade by James Thiessen with Claude Code (Claude Opus 5.5). See the [AI use note](https://github.com/%s#ai-use).\n' "${{ github.repository }}" >> body.md
           gh release edit "$TAG" --notes-file body.md
 
-  # Windows (v0.2): tauri build with the MSI bundler, plus a portable zip.
+  # Windows (v0.2): tauri build with the MSI bundler, plus a portable zip. Runs after the Linux
+  # job, which creates the release and the first latest.json / SHA256SUMS; this job adds its own
+  # files and rewrites those two (so the AUR job, which needs only linux, is unaffected).
+  windows:
+    needs: linux
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      VERSION: ${{ needs.linux.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: npm ci
+        working-directory: ui
+
+      # tauri build runs the UI build first (beforeBuildCommand) and the MSI bundler (WiX, which
+      # tauri downloads); the zip is ours.
+      # The overlay goes into the MSI as a sidecar (tauri.windows.conf.json), installed next to
+      # arrowhead.exe, where the app looks for it.
+      - name: Build app (MSI), cli and overlay
+        run: |
+          cargo build --release -p arrowhead-cli -p arrowhead-overlay
+          cp target/release/arrowhead-overlay.exe target/release/arrowhead-overlay-x86_64-pc-windows-msvc.exe
+          npm --prefix ui run tauri build -- --bundles msi
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          msi="arrowhead-${VERSION}-windows-x86_64.msi"
+          zip="arrowhead-${VERSION}-windows-x86_64.zip"
+          cp target/release/bundle/msi/*.msi "dist/$msi"
+          name="arrowhead-${VERSION}-windows-x86_64"
+          mkdir -p "dist/$name"
+          cp target/release/arrowhead.exe target/release/arrowhead-cli.exe target/release/arrowhead-overlay.exe LICENSE README.md "dist/$name/"
+          (cd dist && powershell -NoProfile -Command "Compress-Archive -Path '$name' -DestinationPath '$zip'")
+          echo "MSI=$msi" >> "$GITHUB_ENV"
+          echo "ZIP=$zip" >> "$GITHUB_ENV"
+
+      # The updater replaces the MSI, so the MSI is what gets signed and listed in latest.json.
+      - name: Sign, merge into latest.json and SHA256SUMS
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          cd dist
+          ../ui/node_modules/.bin/tauri signer sign "$MSI"
+          gh release download "$TAG" -p latest.json -p SHA256SUMS
+          jq \
+            --arg signature "$(cat "$MSI.sig")" \
+            --arg url "https://github.com/${{ github.repository }}/releases/download/$TAG/$MSI" \
+            '.platforms["windows-x86_64"] = {signature: $signature, url: $url}' \
+            latest.json > latest.new
+          mv latest.new latest.json
+          grep -v ' latest.json$' SHA256SUMS > sums.new || true
+          sha256sum "$MSI" "$ZIP" latest.json >> sums.new
+          mv sums.new SHA256SUMS
+
+      - name: Upload to the release
+        run: gh release upload "$TAG" dist/"$MSI" dist/"$MSI".sig dist/"$ZIP" dist/latest.json dist/SHA256SUMS --clobber
 
   aur:
     needs: linux

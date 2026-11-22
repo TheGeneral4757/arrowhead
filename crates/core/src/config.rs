@@ -610,7 +610,11 @@ mod tests {
         append_history(&p, &e).unwrap();
         let e2 = HistoryEntry {
             seed: 2,
-            hit_hist: Some(HitHist { from_ms: -230.0, bin_ms: 10.0, counts: vec![0, 3, 1] }),
+            hit_hist: Some(HitHist {
+                from_ms: -230.0,
+                bin_ms: 10.0,
+                counts: vec![0, 3, 1],
+            }),
             ..e.clone()
         };
         append_history(&p, &e2).unwrap();
@@ -619,9 +623,21 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(serde_json::from_str::<HistoryEntry>(lines[1]).unwrap(), e2);
 
-        fs::OpenOptions::new().append(true).open(&p).unwrap().write_all(b"not json\n").unwrap();
-        assert_eq!(read_history(&p, 10, 0).unwrap(), vec![e2.clone(), e.clone()]);
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&p)
+            .unwrap()
+            .write_all(b"not json\n")
+            .unwrap();
+        assert_eq!(
+            read_history(&p, 10, 0).unwrap(),
+            vec![e2.clone(), e.clone()]
+        );
         assert_eq!(read_history(&p, 1, 1).unwrap(), vec![e]);
-        assert!(read_history(&dir.path().join("none.jsonl"), 10, 0).unwrap().is_empty());
+        assert!(
+            read_history(&dir.path().join("none.jsonl"), 10, 0)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

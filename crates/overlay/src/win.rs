@@ -194,9 +194,16 @@ pub fn run(output: Option<String>, size: Option<(i32, i32)>) -> Result<(), Strin
             .as_deref()
             .and_then(|n| mons.iter().position(|m| m.name.contains(n)))
             .or_else(|| {
-                let (sw, sh) = size?;
+                // DXGI and WGC capture the primary monitor (at 0,0; the profile names it
+                // "primary"), so prefer it when its size fits, then any monitor of that size.
+                let fits = |m: &Mon| {
+                    size.is_none_or(|(sw, sh)| {
+                        (m.rect.right - m.rect.left, m.rect.bottom - m.rect.top) == (sw, sh)
+                    })
+                };
                 mons.iter()
-                    .position(|m| (m.rect.right - m.rect.left, m.rect.bottom - m.rect.top) == (sw, sh))
+                    .position(|m| m.rect.left == 0 && m.rect.top == 0 && fits(m))
+                    .or_else(|| size.and_then(|_| mons.iter().position(fits)))
             })
             .or((!mons.is_empty()).then_some(0))
             .map(|i| mons.swap_remove(i))

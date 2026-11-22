@@ -6,7 +6,6 @@
 
 use std::time::{Duration, Instant};
 
-
 use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState, Region};
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::reexports::calloop::EventLoop;

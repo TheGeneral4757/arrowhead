@@ -111,7 +111,35 @@ pub fn focus(seconds: f32) -> Res {
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
+/// `focus`: print the foreground window's exe as the Windows probe sees it.
+#[cfg(windows)]
+pub fn focus(seconds: f32) -> Res {
+    use arrowhead_core::config::{Config, config_dir, load_toml};
+    use arrowhead_core::input::FocusProbe;
+    use std::time::{Duration, Instant};
+    let cfg: Config = config_dir()
+        .map(|d| load_toml(&d.join("config.toml")))
+        .transpose()?
+        .unwrap_or_default();
+    let mut probe = arrowhead_input::winfocus::WindowsProbe::new(cfg.safety.game_window_classes);
+    let t0 = Instant::now();
+    let mut last = None;
+    while t0.elapsed().as_secs_f32() < seconds {
+        let exe = probe.foreground_exe();
+        if exe != last {
+            println!(
+                "{:6.1} s  foreground {exe:?}  game focused: {:?}",
+                t0.elapsed().as_secs_f32(),
+                probe.game_focused().ok()
+            );
+            last = exe;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 pub fn focus(_: f32) -> Res {
     Err("no focus probe on this OS yet".into())
 }

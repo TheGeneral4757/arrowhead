@@ -46,6 +46,15 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
 
+      # Windows: the app bundles the overlay as a sidecar (tauri.windows.conf.json), and its build
+      # script wants the target-suffixed binary to exist.
+      - name: Overlay sidecar
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cargo build --release -p arrowhead-overlay
+          cp target/release/arrowhead-overlay.exe target/release/arrowhead-overlay-x86_64-pc-windows-msvc.exe
+
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace

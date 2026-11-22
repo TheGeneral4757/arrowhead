@@ -37,3 +37,9 @@ Linux runtime deps (documented in README): webkit2gtk-4.1, libsoup3, gtk3, pipew
 2. Branch protection on `main`: CI required, squash merge.
 3. Secrets: `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (key pair made 2026-11-22, kept in `~/.tauri/arrowhead.key*` on the dev box; the public key is in `tauri.conf.json`); `RELEASE_TOKEN` (a PAT, so release-please's tag starts `release.yml`); optional `AUR_SSH_KEY` (private half of a dedicated ed25519 key whose public half is on the AUR account) and `AUR_EMAIL` (AUR commit email).
 4. Archive fnf-thing-v2: push `d600e1a`, add a README pointer to arrowhead, `gh repo archive`.
+
+## v0.2 Windows status (2026-11-22)
+- `release.yml` job `windows` (windows-latest, `needs: linux`): `tauri build --bundles msi`, `cargo build --release -p arrowhead-cli`, then the MSI and a portable zip (`arrowhead.exe`, `arrowhead-cli.exe`, LICENSE, README). The MSI is signed with `tauri signer sign` (same as the Linux tarball; `createUpdaterArtifacts` stays false) and added to `latest.json` as `windows-x86_64`; the job downloads the Linux job's `latest.json` and `SHA256SUMS`, adds its entries and re-uploads with `--clobber`. The overlay is Linux-only and not in the zip.
+- `ci.yml` already runs fmt, clippy and tests on windows-latest.
+- The overlay ships in the MSI as a Tauri sidecar (`crates/app/tauri.windows.conf.json`, `externalBin`), installed as `arrowhead-overlay.exe` next to `arrowhead.exe`, and in the zip. Tauri's build script needs the target-suffixed binary (`arrowhead-overlay-x86_64-pc-windows-msvc.exe`) to exist, so CI and the release job build the overlay and copy it to that name first; a Windows dev build needs the same.
+- Untested: the whole job (WiX download, MSI name glob `target/release/bundle/msi/*.msi`, `Compress-Archive`, the jq merge, signing on Windows). First real tag will show.

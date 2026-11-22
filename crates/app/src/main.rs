@@ -102,7 +102,20 @@ fn open_source(fresh: bool) -> CmdRes<Src> {
     Ok(Box::new(PipewireSource::open(&token).map_err(err)?))
 }
 
-#[cfg(not(target_os = "linux"))]
+/// Windows: DXGI / WGC by `capture.windows_backend`; there is no picker, so `fresh` is unused.
+#[cfg(windows)]
+fn open_source(_: bool) -> CmdRes<Src> {
+    let cfg = load_config().map_err(err)?;
+    Ok(Box::new(
+        arrowhead_capture::WindowsSource::open(
+            cfg.capture.windows_backend,
+            cfg.safety.game_window_classes,
+        )
+        .map_err(err)?,
+    ))
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 fn open_source(_: bool) -> CmdRes<Src> {
     Err("screen capture on this OS arrives in v0.2".into())
 }
@@ -394,7 +407,9 @@ fn get_profile() -> CmdRes<Profile> {
 /// Newest first.
 #[tauri::command]
 fn history(limit: usize, offset: usize) -> CmdRes<Vec<HistoryEntry>> {
-    let Some(dir) = data_dir() else { return Ok(Vec::new()) };
+    let Some(dir) = data_dir() else {
+        return Ok(Vec::new());
+    };
     read_history(&dir.join("history.jsonl"), limit.min(1000), offset).map_err(err)
 }
 

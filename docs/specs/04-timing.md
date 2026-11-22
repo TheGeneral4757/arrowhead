@@ -91,3 +91,7 @@ Scheduler lateness (`cli bench`, SCHED_FIFO via the `realtime` group): p99 under
 Real footage (`cli detect --plan`, 12 s of song-01): scroll 1.94 px/ms, no speed changes, 56 presses planned (7 holds), none missed by the engine. 69 moving note tracks were seen; the 13 not pressed vanished more than ~140 ms before their crossing because the user hit them early in the recording, which cannot happen when arrowhead plays.
 
 Update 2026-11-22: `cli latency` (terminal as the test window, result saved as the profile's `latency.input_ms`, reference only), hotkeys, panic hook and signal handlers (spec 05) are built. Readback moves to v0.2 with the HUD reader ([11](11-roadmap.md)). Run on the user's machine 2026-11-22: latency test, dry run, live runs and hotkeys all work; best offset is a hand-set -5.2 ms (`latency.game_bias_ms`).
+
+## v0.2 Windows status (2026-11-22)
+- `runtime::platform` on Windows: `monotonic_ns` = QPC in ns (`qpc_to_ns` is overflow-safe and unit-tested); `qpc_ticks_to_ns` converts DXGI's `LastPresentTime` onto the same clock. `sleep_abs_ns` = per-thread `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` timer that stops 700 us before the target (the timer can wake ~0.5 ms late), then `RealClock` spins. `make_realtime` = `THREAD_PRIORITY_HIGHEST` on the calling thread (scan, scheduler and the capture thread call it).
+- Untested: `cli bench` on Windows (the p99 < 0.3 ms target is unmeasured; the 700 us margin is a guess), timer availability below Windows 10 1803 (falls back to `thread::sleep`).
