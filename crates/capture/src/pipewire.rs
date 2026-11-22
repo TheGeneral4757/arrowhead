@@ -289,7 +289,6 @@ fn run_loop(
             let Some(mut buffer) = stream.dequeue_buffer() else {
                 return;
             };
-            let t0 = Instant::now();
             let now = monotonic_ns();
             let pts = buffer
                 .find_meta::<spa::buffer::meta::MetaHeader>()
@@ -328,32 +327,29 @@ fn run_loop(
             };
 
             let full = Rect::new(0, 0, w, h);
-            data.shared.ring.produce(
-                |slot, want| {
-                    let r = if want.w == 0 || want.h == 0 {
-                        full
-                    } else {
-                        want.intersect(&full).unwrap_or(full)
+            data.shared.ring.produce(|slot, want| {
+                let r = if want.w == 0 || want.h == 0 {
+                    full
+                } else {
+                    want.intersect(&full).unwrap_or(full)
+                };
+                let row = r.w as usize * 4;
+                let need = row * r.h as usize;
+                if slot.data.len() < need {
+                    slot.data.resize(need, 0);
+                }
+                for y in 0..r.h as usize {
+                    let src = (r.y as usize + y) * stride + r.x as usize * 4;
+                    let Some(line) = bytes.get(src..src + row) else {
+                        return false;
                     };
-                    let row = r.w as usize * 4;
-                    let need = row * r.h as usize;
-                    if slot.data.len() < need {
-                        slot.data.resize(need, 0);
-                    }
-                    for y in 0..r.h as usize {
-                        let src = (r.y as usize + y) * stride + r.x as usize * 4;
-                        let Some(line) = bytes.get(src..src + row) else {
-                            return false;
-                        };
-                        slot.data[y * row..(y + 1) * row].copy_from_slice(line);
-                    }
-                    slot.region = r;
-                    slot.stride = row;
-                    slot.pts = Nanos(pts.unwrap_or(now));
-                    true
-                },
-                t0.elapsed().as_nanos() as u32,
-            );
+                    slot.data[y * row..(y + 1) * row].copy_from_slice(line);
+                }
+                slot.region = r;
+                slot.stride = row;
+                slot.pts = Nanos(pts.unwrap_or(now));
+                true
+            });
             if let Some(tx) = data.ready.take() {
                 let _ = tx.send(Ok(()));
             }

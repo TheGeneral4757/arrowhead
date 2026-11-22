@@ -98,7 +98,8 @@ impl Ring {
 
     /// Producer side. `fill` gets a free slot and the requested region and
     /// returns false to discard the frame.
-    pub fn produce(&self, fill: impl FnOnce(&mut Slot, Rect) -> bool, copy_ns: u32) {
+    /// The time spent in `fill` is recorded as the copy time.
+    pub fn produce(&self, fill: impl FnOnce(&mut Slot, Rect) -> bool) {
         let (idx, region) = {
             let s = self.state.lock().unwrap();
             let idx = (0..3)
@@ -108,9 +109,11 @@ impl Ring {
         };
         // SAFETY: idx is neither latest nor reading, so the consumer cannot see it.
         let slot = unsafe { &mut *self.slots[idx].get() };
+        let t0 = std::time::Instant::now();
         if !fill(slot, region) {
             return;
         }
+        let copy_ns = t0.elapsed().as_nanos().min(u32::MAX as u128) as u32;
         let mut s = self.state.lock().unwrap();
         if s.latest.is_some() {
             s.drops += 1;
@@ -174,14 +177,11 @@ mod tests {
     use std::sync::Arc;
 
     fn push(ring: &Ring, v: u8) {
-        ring.produce(
-            |slot, _| {
-                slot.data.clear();
-                slot.data.push(v);
-                true
-            },
-            1,
-        );
+        ring.produce(|slot, _| {
+            slot.data.clear();
+            slot.data.push(v);
+            true
+        });
     }
 
     #[test]
