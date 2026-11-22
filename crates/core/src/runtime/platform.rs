@@ -69,3 +69,40 @@ pub fn make_realtime() -> &'static str {
 pub fn make_realtime() -> &'static str {
     "normal"
 }
+
+/// Set by SIGINT/SIGTERM/SIGHUP and the panic hook (S2): run loops stop and release all keys.
+pub static EXIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(unix)]
+extern "C" fn on_exit_signal(_: libc::c_int) {
+    EXIT.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// Installs the exit signal handlers and a panic hook that sets `EXIT` before the default hook.
+pub fn install_exit_hooks() {
+    #[cfg(unix)]
+    // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
+    unsafe {
+        for s in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+            libc::signal(s, on_exit_signal as *const () as libc::sighandler_t);
+        }
+    }
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        EXIT.store(true, std::sync::atomic::Ordering::SeqCst);
+        default(info);
+    }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn panic_sets_exit() {
+        install_exit_hooks();
+        assert!(std::panic::catch_unwind(|| panic!("boom")).is_err());
+        assert!(EXIT.load(Ordering::SeqCst));
+    }
+}

@@ -12,6 +12,7 @@ use arrowhead_core::time::Nanos;
 use clap::{Parser, Subcommand};
 
 mod detect;
+mod latency;
 mod run;
 
 #[derive(Parser)]
@@ -90,9 +91,10 @@ enum Cmd {
         live: bool,
         #[arg(long, default_value_t = 60.0)]
         seconds: f32,
-        /// Added to every press: negative presses earlier
-        #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
-        offset_ms: f64,
+        /// Added to every press: negative presses earlier. Default: the profile's
+        /// latency.game_bias_ms
+        #[arg(long, allow_hyphen_values = true)]
+        offset_ms: Option<f64>,
         /// Seconds of song used to learn colours before playing
         #[arg(long, default_value_t = 8.0)]
         learn: f32,
@@ -104,6 +106,12 @@ enum Cmd {
     Focus {
         #[arg(long, default_value_t = 10.0)]
         seconds: f32,
+    },
+    /// Input latency test: this terminal flashes on a uinput key, the capture times it.
+    /// Keep the terminal focused, large and on the captured monitor
+    Latency {
+        #[arg(long, default_value_t = 50)]
+        trials: u32,
     },
     /// Measure scheduler lateness on the real clock (no keys sent)
     Bench {
@@ -187,6 +195,9 @@ fn main() -> ExitCode {
         }),
         Cmd::Focus { seconds } => run::focus(seconds),
         Cmd::Bench { presses } => run::bench(presses),
+        Cmd::Latency { trials } => {
+            open_screen().and_then(|mut src| latency::latency(&mut src, trials))
+        }
     };
     match res {
         Ok(()) => ExitCode::SUCCESS,

@@ -13,3 +13,5 @@ serde.workspace = true
 evdev.workspace = true
 zbus.workspace = true
 tokio.workspace = true
+ashpd = { workspace = true, features = ["global_shortcuts"] }
+futures-util = { version = "0.3", default-features = false }

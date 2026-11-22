@@ -51,13 +51,16 @@ For each confirmed track:
   - If the focus gate is closed at send time: drop presses, still send releases, emit `Suppressed`.
 
 ## Latency calibration
-Total offset = `-(capture_delay + detect_delay + input_delay) + game_bias`. When the frame pts is the presentation time (PipeWire, trusted), crossings are already predicted on the display clock, so `capture_delay` and `detect_delay` only shorten the warning time and are not subtracted; they are when pts is the receive time. `cli run --offset-ms` sets the total by hand until the latency test and readback exist.
+Total offset = `-(capture_delay + detect_delay + input_delay) + game_bias`. When the frame pts is the presentation time (PipeWire, trusted), crossings are already predicted on the display clock, so `capture_delay` and `detect_delay` only shorten the warning time and are not subtracted; they are when pts is the receive time. `cli run` uses only `game_bias` from the profile; `--offset-ms` overrides it.
+
+> [!warning] Measured input delay does not predict the offset (2026-11-22)
+> `cli latency` measured 19.2 ms (key to the terminal flash on screen). Subtracting it made every press early; a hand-set -5.2 ms played best, about the same as 0. The game hides most of its own render delay, so `input_delay` is kept for reference only and the offset is `game_bias` (hand-set now, readback in v0.2).
 
 | Part | How it is measured | When |
 |---|---|---|
 | capture_delay | `now - pts` at frame receipt (pts age p50) | Live, continuously |
 | detect_delay | Scan time for the frame | Live |
-| input_delay | Setup latency test: the app opens a test window that changes colour on key down; arrowhead sends a key, captures the window through the same capture path, and measures send to seen. Subtract the capture part. 50 trials, use p50 | Setup step "Latency" |
+| input_delay | Latency test: a test window turns white on key down; arrowhead sends a key, captures the screen through the same capture path, and measures send to seen (frame pts). Subtract the capture part (zero when pts is the presentation time). 50 trials, use p50. CLI: `cli latency`, where the terminal itself is the test window | Setup step "Latency" (app), `cli latency` |
 | game_bias | Readback, below. Covers everything not measured above (game frame timing, audio sync, unknown offsets) | During play |
 
 The offset is shown on Live > Pipeline and stored per profile.
@@ -76,7 +79,7 @@ Per frame: scan time. Per press: planned vs actual send time (scheduler lateness
 - Synthetic replay with `VirtualClock`, Max style: every press within +/- 2 ms of ground-truth crossing for scroll speeds 1.0-4.0 at 60, 144 and 240 Hz capture, with 1 ms pts jitter and 2% dropped frames.
 - Scheduler lateness p99 under 0.3 ms on the dev machine (real clock, idle system).
 - Holds released within +/- 5 ms of trail end; jacks at 60 ms spacing never merge.
-- Real game, M4 exit: a full Hard song with Max on Linux, readback mean within +/- 3 ms and no misses.
+- Real game, M4 exit: a full Hard song with Max on Linux and no misses. The readback mean check (+/- 3 ms) moves to v0.2 with the HUD reader.
 
 ## M4 status (2026-11-21)
 Built: `core::track`, `core::plan`, `core::sched`, `core::engine` (detect -> track -> plan on the scan thread), `RealClock::sleep_until` (absolute `clock_nanosleep` to t - 300 us, then spin) and `VirtualClock`, `cli run` (dry run unless `--live`), `cli bench`, `cli detect --plan`.
@@ -87,4 +90,4 @@ Scheduler lateness (`cli bench`, SCHED_FIFO via the `realtime` group): p99 under
 
 Real footage (`cli detect --plan`, 12 s of song-01): scroll 1.94 px/ms, no speed changes, 56 presses planned (7 holds), none missed by the engine. 69 moving note tracks were seen; the 13 not pressed vanished more than ~140 ms before their crossing because the user hit them early in the recording, which cannot happen when arrowhead plays.
 
-Not done yet: readback (needs HUD reading), the latency test (needs a test window), hotkeys (GlobalShortcuts portal shows a KDE dialog), panic hook and signal handlers (the kernel releases uinput keys when the process dies), the live Max run.
+Update 2026-11-22: `cli latency` (terminal as the test window, result saved as the profile's `latency.input_ms`, reference only), hotkeys, panic hook and signal handlers (spec 05) are built. Readback moves to v0.2 with the HUD reader ([11](11-roadmap.md)). Run on the user's machine 2026-11-22: latency test, dry run, live runs and hotkeys all work; best offset is a hand-set -5.2 ms (`latency.game_bias_ms`).

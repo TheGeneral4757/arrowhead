@@ -44,6 +44,16 @@ pub trait FocusProbe: Send {
     fn name(&self) -> &'static str;
 }
 
+/// Global hotkey actions (spec 05).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hotkey {
+    Toggle,
+    Panic,
+    NudgeUp,
+    NudgeDown,
+    CycleStyle,
+}
+
 /// Lane keys (left, down, up, right) for a key set (spec 05).
 pub fn key_names(set: crate::config::KeySet, custom: &[String; 4]) -> [&str; 4] {
     use crate::config::KeySet;

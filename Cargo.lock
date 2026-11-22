@@ -162,7 +162,9 @@ name = "arrowhead-input"
 version = "0.1.0"
 dependencies = [
  "arrowhead-core",
+ "ashpd",
  "evdev",
+ "futures-util",
  "serde",
  "tokio",
  "zbus",

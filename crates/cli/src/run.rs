@@ -11,9 +11,9 @@ use arrowhead_core::detect::calib::{
 use arrowhead_core::detect::{Colours, DetectConfig, Detector, Layout};
 use arrowhead_core::engine::Engine;
 use arrowhead_core::frame::{FrameSource, FrameView, OwnedFrame};
-use arrowhead_core::input::{KeySink, NullSink, key_names};
+use arrowhead_core::input::{Hotkey, KeySink, NullSink, key_names};
 use arrowhead_core::plan::{Cmd, PlanConfig};
-use arrowhead_core::runtime::platform::make_realtime;
+use arrowhead_core::runtime::platform::{EXIT, install_exit_hooks, make_realtime};
 use arrowhead_core::sched::{SchedEvent, Scheduler};
 use arrowhead_core::time::{Clock, Nanos, RealClock};
 
@@ -22,7 +22,8 @@ use crate::{Res, pct};
 pub struct Opts {
     pub live: bool,
     pub seconds: f32,
-    pub offset_ms: f64,
+    /// None: the profile's game bias.
+    pub offset_ms: Option<f64>,
     pub learn_s: f32,
     pub relearn: bool,
 }
@@ -237,6 +238,9 @@ pub fn run(src: &mut dyn FrameSource, o: Opts) -> Res {
         },
         colours.head_len
     );
+    // Not -input_ms: the game hides most of its own render delay, so the measured 19 ms made
+    // presses early; a hand-tuned -5.2 ms played best (2026-11-22). Readback will tune it in v0.2.
+    let offset_ms = o.offset_ms.unwrap_or(prof.latency.game_bias_ms as f64);
     let mut learning = colours.trail.is_none();
     let mut det = Detector::new(layout.clone(), dcfg, colours);
     for (l, bg) in learner.bg.iter().enumerate() {
@@ -272,13 +276,18 @@ pub fn run(src: &mut dyn FrameSource, o: Opts) -> Res {
                 }
             })?;
     }
-    let plan = PlanConfig::from_config(&cfg, o.offset_ms);
+    let plan = PlanConfig::from_config(&cfg, offset_ms);
     let max_hold = plan.max_hold_ms;
     let mut eng = Engine::new(det, plan);
 
+    // From here Ctrl+C stops play cleanly; before it, calibration is simply killed (no keys yet).
+    install_exit_hooks();
     // Focus guard (S3): fail open with a warning unless the config requires it.
     let focus = Arc::new(AtomicBool::new(true));
     let stop = Arc::new(AtomicBool::new(false));
+    let paused = Arc::new(AtomicBool::new(false));
+    let (hk_tx, hk_rx) = mpsc::channel::<Hotkey>();
+    let (_hotkeys, hk_bound) = start_hotkeys(&cfg, hk_tx);
     let _probe = start_focus(&cfg, focus.clone(), stop.clone())?;
 
     let mut sink: Box<dyn KeySink> = if o.live {
@@ -295,12 +304,12 @@ pub fn run(src: &mut dyn FrameSource, o: Opts) -> Res {
             "dry run: no keys sent"
         },
         sink.name(),
-        o.offset_ms
+        offset_ms
     );
 
     let (tx, rx) = mpsc::sync_channel::<Cmd>(256);
     let (etx, erx) = mpsc::channel::<SchedEvent>();
-    let (f2, s2) = (focus.clone(), stop.clone());
+    let (f2, s2, p2) = (focus.clone(), stop.clone(), paused.clone());
     let sched = std::thread::Builder::new()
         .name("scheduler".into())
         .spawn(move || {
@@ -309,7 +318,9 @@ pub fn run(src: &mut dyn FrameSource, o: Opts) -> Res {
             let mut s = Scheduler::new(max_hold);
             let mut ev = Vec::new();
             let mut last_dog = clock.now();
-            while !s2.load(Ordering::SeqCst) {
+            // EXIT also covers a panic on the scan thread (S2).
+            while !s2.load(Ordering::SeqCst) && !EXIT.load(Ordering::SeqCst) {
+                let gate = f2.load(Ordering::SeqCst) && !p2.load(Ordering::SeqCst);
                 while let Ok(c) = rx.try_recv() {
                     s.submit(c);
                 }
@@ -317,12 +328,7 @@ pub fn run(src: &mut dyn FrameSource, o: Opts) -> Res {
                 match s.next_due() {
                     Some(t) if t.ms_since(now) < 2.0 => {
                         clock.sleep_until(t);
-                        s.fire_due(
-                            clock.now(),
-                            f2.load(Ordering::SeqCst),
-                            sink.as_mut(),
-                            &mut ev,
-                        );
+                        s.fire_due(clock.now(), gate, sink.as_mut(), &mut ev);
                     }
                     due => {
                         let wait = due.map_or(50.0, |t| t.ms_since(now) - 1.5).clamp(0.1, 50.0);
@@ -336,8 +342,8 @@ pub fn run(src: &mut dyn FrameSource, o: Opts) -> Res {
                     last_dog = now;
                     s.watchdog(now, sink.as_mut(), &mut ev);
                 }
-                if !f2.load(Ordering::SeqCst) {
-                    // Focus lost: release everything at once (spec 05).
+                if !gate {
+                    // Focus lost or paused: release everything at once (spec 05).
                     for l in 0..4 {
                         if s.is_down(l) {
                             s.release_all(sink.as_mut());
@@ -367,7 +373,34 @@ pub fn run(src: &mut dyn FrameSource, o: Opts) -> Res {
     let (mut pressed, mut suppressed, mut watchdog, mut frames) = (0u32, 0u32, 0u32, 0u32);
     let mut cmds = Vec::with_capacity(32);
     let mut tick = Instant::now();
-    while Instant::now() < t_end {
+    while Instant::now() < t_end && !EXIT.load(Ordering::SeqCst) {
+        if let Ok(r) = hk_bound.try_recv() {
+            match r {
+                Ok(list) => eprintln!("hotkeys bound: {list}"),
+                Err(e) => {
+                    eprintln!("WARNING: hotkeys off ({e}); Ctrl+C here or alt-tab away to stop")
+                }
+            }
+        }
+        for h in hk_rx.try_iter() {
+            match h {
+                Hotkey::Toggle => {
+                    let p = !paused.load(Ordering::SeqCst);
+                    paused.store(p, Ordering::SeqCst);
+                    eprintln!("{}", if p { "paused" } else { "resumed" });
+                }
+                Hotkey::Panic => {
+                    eprintln!("PANIC: releasing all keys and stopping");
+                    EXIT.store(true, Ordering::SeqCst);
+                }
+                Hotkey::NudgeUp | Hotkey::NudgeDown => {
+                    let d = if h == Hotkey::NudgeUp { 1.0 } else { -1.0 };
+                    eng.planner.cfg.offset_ms += d;
+                    eprintln!("offset {:+.1} ms", eng.planner.cfg.offset_ms);
+                }
+                Hotkey::CycleStyle => eprintln!("presets arrive in v0.2 (Max only for now)"),
+            }
+        }
         let Some(f) = src.next_frame(Duration::from_millis(200))? else {
             continue;
         };
@@ -416,7 +449,9 @@ pub fn run(src: &mut dyn FrameSource, o: Opts) -> Res {
                     .velocity()
                     .map_or("-".into(), |v| format!("{:.2}", v.abs())),
                 eng.planner.missed_by_engine,
-                if focus.load(Ordering::SeqCst) {
+                if paused.load(Ordering::SeqCst) {
+                    "paused"
+                } else if focus.load(Ordering::SeqCst) {
                     "game"
                 } else {
                     "away"
@@ -427,6 +462,9 @@ pub fn run(src: &mut dyn FrameSource, o: Opts) -> Res {
     }
     stop.store(true, Ordering::SeqCst);
     let _ = sched.join();
+    if EXIT.load(Ordering::SeqCst) {
+        eprintln!("stopped early: all keys released");
+    }
     println!(
         "done: {pressed} presses, {} missed by engine, {suppressed} suppressed (focus), {watchdog} watchdog releases",
         eng.planner.missed_by_engine
@@ -444,13 +482,46 @@ pub fn run(src: &mut dyn FrameSource, o: Opts) -> Res {
 }
 
 #[cfg(target_os = "linux")]
-fn live_sink(keys: [&str; 4]) -> Result<Box<dyn KeySink>, Box<dyn std::error::Error>> {
+pub(crate) fn live_sink(keys: [&str; 4]) -> Result<Box<dyn KeySink>, Box<dyn std::error::Error>> {
     Ok(Box::new(arrowhead_input::uinput::UinputSink::new(keys)?))
 }
 
 #[cfg(not(target_os = "linux"))]
-fn live_sink(_: [&str; 4]) -> Result<Box<dyn KeySink>, Box<dyn std::error::Error>> {
+pub(crate) fn live_sink(_: [&str; 4]) -> Result<Box<dyn KeySink>, Box<dyn std::error::Error>> {
     Err("live input on this OS arrives in v0.2".into())
+}
+
+/// Global hotkeys (spec 05). Returns the guard and a receiver for the one bind result.
+#[cfg(target_os = "linux")]
+fn start_hotkeys(
+    cfg: &Config,
+    tx: mpsc::Sender<Hotkey>,
+) -> (
+    Option<arrowhead_input::hotkeys::PortalHotkeys>,
+    mpsc::Receiver<Result<String, String>>,
+) {
+    eprintln!(
+        "binding hotkeys (toggle {}, panic {}, nudge {}/{}); the desktop may ask you to confirm",
+        cfg.hotkeys.toggle, cfg.hotkeys.panic, cfg.hotkeys.nudge_up, cfg.hotkeys.nudge_down
+    );
+    match arrowhead_input::hotkeys::PortalHotkeys::start(&cfg.hotkeys, tx) {
+        Ok((h, rx)) => (Some(h), rx),
+        Err(e) => {
+            let (etx, rx) = mpsc::channel();
+            let _ = etx.send(Err(e.to_string()));
+            (None, rx)
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn start_hotkeys(
+    _: &Config,
+    _: mpsc::Sender<Hotkey>,
+) -> ((), mpsc::Receiver<Result<String, String>>) {
+    let (etx, rx) = mpsc::channel();
+    let _ = etx.send(Err("no hotkeys on this OS yet".into()));
+    ((), rx)
 }
 
 /// Polls the focus probe at 10 Hz into `focus`. Returns the probe thread's guard.

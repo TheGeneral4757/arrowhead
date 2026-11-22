@@ -73,9 +73,9 @@ Setup's Permissions step shows which backend is active; the `input` group hint a
 | # | Rule | Mechanism |
 |---|---|---|
 | S1 | No key stays down longer than planned | Watchdog in the scheduler thread: every 50 ms, any lane down for more than `planned_release + 250 ms` (hard cap `safety.max_hold_ms`, default 15000) is released and logged as `WatchdogRelease` |
-| S2 | All keys released on any exit | `Drop` for the sink; panic hook (`std::panic::set_hook`) calls `release_all` through a global handle; SIGINT/SIGTERM/SIGHUP handler (Linux) and `SetConsoleCtrlHandler` + `WM_ENDSESSION` (Windows) do the same. Destroying the uinput device also makes the kernel release its keys |
+| S2 | All keys released on any exit | `Drop` for the sink; the panic hook and the SIGINT/SIGTERM/SIGHUP handlers (Linux) set the global `runtime::platform::EXIT` flag, and the scheduler thread checks it every loop (at most 50 ms) and releases all. `SetConsoleCtrlHandler` + `WM_ENDSESSION` on Windows in v0.2. Destroying the uinput device also makes the kernel release its keys |
 | S3 | No keys to other windows | Focus gate checked per batch |
-| S4 | Panic always works | Panic path does not go through the scheduler queue: it takes the sink lock directly |
+| S4 | Panic always works | Panic does not go through the scheduler queue: it sets `EXIT`, which the scheduler checks every loop; the process then exits, which destroys the uinput device. No lock on the hot path |
 | S5 | Dry run is clean | `NullSink` is selected at engine start; switching while running restarts the engine |
 
 ## Acceptance
@@ -87,3 +87,8 @@ Setup's Permissions step shows which backend is active; the `input` group hint a
 - `KwinProbe`: serves `org.arrowhead.Focus` on the session bus, loads a generated KWin script with `org.kde.kwin.Scripting.loadScript`/`start`, unloads it on drop. Checked on Plasma 6: reports the active window's `resourceClass` within 0.1 s (`cli focus`). Sober's class still to be confirmed with the game running.
 - `cli run` polls the probe at 10 Hz into the scheduler's focus gate; on focus loss everything is released. No report yet counts as focused (fail open) unless `safety.require_focus_guard`.
 - The `input` group is not set on the dev box, so the evdev hotkey fallback cannot read keyboards; hotkeys wait for the GlobalShortcuts portal. Until then: alt-tab away (focus gate) or Ctrl+C in the terminal; the kernel releases uinput keys when the process exits.
+
+## M4 status update (2026-11-22)
+- Hotkeys: `PortalHotkeys` (`arrowhead-input::hotkeys`) binds toggle, panic, nudge up/down and cycle preset through the GlobalShortcuts portal, registering the host app id `org.arrowhead.Arrowhead` first. Bound in the background so `cli run` does not wait for the desktop's confirm dialog. Toggle pauses (same gate as focus loss: everything released, presses suppressed); nudge moves the offset by +/- 1 ms; cycle preset waits for v0.2. Checked on the user's desktop 2026-11-22: keys work. The evdev fallback is not built (no `input` group on the dev box).
+- S2/S4: `install_exit_hooks` (signals + panic hook) and the scheduler's `EXIT` check are built; Ctrl+C now stops `cli run` cleanly with all keys released. The SIGKILL integration test is not built.
+

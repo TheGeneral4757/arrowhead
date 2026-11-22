@@ -5,7 +5,7 @@ Guidance for Claude Code in this repo.
 ## Project
 arrowhead: screen-reading Funky Friday (Roblox) autoplayer, 4-key ("4K") mode only, for private servers. Dev setup: game on a 2560x1440 165 Hz monitor (DP-2). Rust Cargo workspace + Tauri 2 app with a React/TS front end. Linux first (KDE Plasma 6 test target, Hyprland daily), Windows in v0.2. Successor to `~/GitHub/fnf-thing-v2` (reference code for the PipeWire, uinput, DXGI and SendInput backends).
 
-**Status:** M0-M3 merged. M4 (timing, input, safety) on branch `m4`: tracker, planner, scheduler, uinput sink, KWin focus probe and `cli run` built and tested on synthetic replays; waiting on a dry run and a live run with the game. See `docs/specs/04-timing.md` (M4 status) and `11-roadmap.md`.
+**Status:** M0-M3 merged. M4 (timing, input, safety) on branch `m4`: tracker, planner, scheduler, uinput sink, KWin focus probe, portal hotkeys, exit/panic hooks, `cli latency` and `cli run` built; live runs work with a hand-set offset (-5.2 ms in the profile's `latency.game_bias_ms`). Readback moved to v0.2 with the HUD reader. See `docs/specs/04-timing.md` (M4 status) and `11-roadmap.md`.
 
 ## Where things are
 | Need | Read |
@@ -39,6 +39,7 @@ arrowhead: screen-reading Funky Friday (Roblox) autoplayer, 4-key ("4K") mode on
 | Detect on a clip | `cargo run --release -p arrowhead-cli -- detect clip.ahclip -q --plan --debug-png out/ --every 60` |
 | Play (dry run, no keys) | `cargo run --release -p arrowhead-cli -- run --seconds 60` (add `--live` to send keys) |
 | Focus probe / scheduler bench | `cargo run --release -p arrowhead-cli -- focus` / `-- bench` |
+| Input latency test (reference only, not used as offset) | `cargo run --release -p arrowhead-cli -- latency` |
 | Clip from a recording | `cargo run -p arrowhead-cli -- import ~/ah-clips/song-01.mkv -o tests/clips/x.ahclip --region x,y,w,h --start 300 --seconds 5` |
 
 Clips in `tests/clips/` are git LFS: `git lfs pull` first.
