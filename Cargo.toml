@@ -33,6 +33,8 @@ tempfile = "3"
 clap = { version = "4.6", features = ["derive"] }
 png = "0.18"
 evdev = "0.13"
+windows = "0.62"
+windows-capture = "2.0"
 zbus = { version = "6.5", default-features = false, features = ["tokio", "service"] }
 
 # Detection and the synthetic frame tests are pixel loops; debug builds are too slow for them.

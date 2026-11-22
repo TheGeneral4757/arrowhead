@@ -64,6 +64,24 @@ pub fn key_names(set: crate::config::KeySet, custom: &[String; 4]) -> [&str; 4] 
     }
 }
 
+/// Does the exe path (`C:\...\RobloxPlayerBeta.exe`) match one of `game_window_classes`?
+/// Compared on the file name, case-insensitively, with or without `.exe`.
+pub fn exe_matches(path: &str, classes: &[String]) -> bool {
+    let file = path
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(path)
+        .to_lowercase();
+    if file.is_empty() {
+        return false;
+    }
+    let stem = file.strip_suffix(".exe").unwrap_or(&file);
+    classes.iter().any(|c| {
+        let c = c.to_lowercase();
+        c == file || c.strip_suffix(".exe").unwrap_or(&c) == stem
+    })
+}
+
 /// Tests: records `(time, action)` against a clock.
 pub struct RecordingSink {
     pub clock: Arc<dyn Clock>,

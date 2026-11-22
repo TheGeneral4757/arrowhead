@@ -226,7 +226,24 @@ fn open_screen() -> Result<arrowhead_capture::pipewire::PipewireSource, Box<dyn 
     Ok(PipewireSource::open(&token)?)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+fn open_screen() -> Result<arrowhead_capture::WindowsSource, Box<dyn std::error::Error>> {
+    use arrowhead_core::config::{Config, config_dir, load_toml};
+    let cfg: Config = config_dir()
+        .map(|d| load_toml(&d.join("config.toml")))
+        .transpose()?
+        .unwrap_or_default();
+    eprintln!(
+        "Opening screen capture ({:?})...",
+        cfg.capture.windows_backend
+    );
+    Ok(arrowhead_capture::WindowsSource::open(
+        cfg.capture.windows_backend,
+        cfg.safety.game_window_classes,
+    )?)
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 fn open_screen() -> Result<ReplaySource, Box<dyn std::error::Error>> {
     Err("screen capture on this OS arrives in v0.2".into())
 }
@@ -257,7 +274,7 @@ fn capture(seconds: f32, region: Option<Rect>) -> Res {
         frames += 1;
     }
     let secs = t0.elapsed().as_secs_f64();
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     let stats = src.stats();
     println!(
         "backend      {} ({}), stream {}x{} @ {:.1} Hz",
@@ -286,7 +303,7 @@ fn capture(seconds: f32, region: Option<Rect>) -> Res {
             ""
         }
     );
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     {
         let mut copy: Vec<f64> = stats.copy_ns.iter().map(|&c| c as f64 / 1e3).collect();
         println!(

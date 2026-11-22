@@ -37,3 +37,12 @@ The reference images in `docs/research/ff-refs/` are rough examples, not evidenc
 | P6 | GlobalShortcuts portal works on this KDE and Hyprland setup | unknown | Spike | |
 | P7 | Windows: does Roblox's anti-cheat block SendInput or capture? | unknown | v0.2 test on a spare account | |
 | P8 | Portal window-source restore across Sober restarts | unknown, monitor default | Spike | |
+
+## Windows (v0.2)
+| # | Question | Default | How | Answer |
+|---|---|---|---|---|
+| P9 | Which monitor does DXGI / WGC capture when the game is not on the primary one? | primary (output at 0,0) | Pick the monitor under the game window, or add a setting | |
+| P10 | Is the WGC yellow border really off (`DrawBorderSettings::WithoutBorder`), and can Setup tell? | requested, not detected | Run WGC on Windows 10 and 11 | |
+| P11 | Does SendInput reach a game running elevated, and does the foreground probe see it? | no (UIPI); probe reads "not focused" | Run Roblox as administrator | |
+| P12 | Is WGC `SystemRelativeTime` on the same clock as QPC (`Clock::now()`)? | assumed yes | `cli capture` with `windows_backend = "wgc-monitor"`: pts age should be a few ms, not seconds | |
+| P13 | Does the 700 us margin in the Windows high-resolution timer keep `cli bench` p99 under 0.3 ms? | 700 us | `cli bench` on Windows | |

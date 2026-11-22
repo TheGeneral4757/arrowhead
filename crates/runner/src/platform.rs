@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", windows))]
 use std::time::Duration;
 
 use arrowhead_core::config::Config;
@@ -20,14 +20,23 @@ pub fn live_sink(keys: [&str; 4]) -> Res<Box<dyn KeySink>> {
     Ok(Box::new(arrowhead_input::uinput::UinputSink::new(keys)?))
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+pub fn live_sink(keys: [&str; 4]) -> Res<Box<dyn KeySink>> {
+    Ok(Box::new(arrowhead_input::winsend::SendInputSink::new(
+        keys,
+    )?))
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 pub fn live_sink(_: [&str; 4]) -> Res<Box<dyn KeySink>> {
-    Err("live input on this OS arrives in v0.2".into())
+    Err("live input is not available on this OS".into())
 }
 
 #[cfg(target_os = "linux")]
 pub type HotkeyGuard = Option<arrowhead_input::hotkeys::PortalHotkeys>;
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+pub type HotkeyGuard = Option<arrowhead_input::winhotkeys::WinHotkeys>;
+#[cfg(not(any(target_os = "linux", windows)))]
 pub type HotkeyGuard = ();
 
 /// Global hotkeys (spec 05). Returns the guard and a receiver for the one bind result.
@@ -55,7 +64,31 @@ pub fn start_hotkeys(
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+pub fn start_hotkeys(
+    cfg: &Config,
+    tx: mpsc::Sender<Hotkey>,
+    ev: &Tx,
+) -> (HotkeyGuard, mpsc::Receiver<Result<String, String>>) {
+    log(
+        ev,
+        Level::Info,
+        format!(
+            "registering hotkeys (toggle {}, panic {}, nudge {}/{})",
+            cfg.hotkeys.toggle, cfg.hotkeys.panic, cfg.hotkeys.nudge_up, cfg.hotkeys.nudge_down
+        ),
+    );
+    match arrowhead_input::winhotkeys::WinHotkeys::start(&cfg.hotkeys, tx) {
+        Ok((h, rx)) => (Some(h), rx),
+        Err(e) => {
+            let (etx, rx) = mpsc::channel();
+            let _ = etx.send(Err(e.to_string()));
+            (None, rx)
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 pub fn start_hotkeys(
     _: &Config,
     _: mpsc::Sender<Hotkey>,
@@ -66,16 +99,17 @@ pub fn start_hotkeys(
     ((), rx)
 }
 
-/// Polls the focus probe at 10 Hz into `focus` until `stop`. Returns whether a probe runs.
-#[cfg(target_os = "linux")]
-pub fn start_focus(
+/// Polls `probe` at 10 Hz into `focus` until `stop`, or applies the require-guard policy when
+/// the probe could not start. Returns whether a probe runs.
+#[cfg(any(target_os = "linux", windows))]
+fn run_focus<P: arrowhead_core::input::FocusProbe + 'static>(
+    probe: Result<P, arrowhead_core::input::InputError>,
     cfg: &Config,
     focus: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     ev: &Tx,
 ) -> Res<bool> {
-    use arrowhead_core::input::FocusProbe;
-    match arrowhead_input::kwin::KwinProbe::start(cfg.safety.game_window_classes.clone()) {
+    match probe {
         Ok(mut probe) => {
             std::thread::Builder::new()
                 .name("focus".into())
@@ -102,7 +136,32 @@ pub fn start_focus(
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+/// Polls the focus probe at 10 Hz into `focus` until `stop`. Returns whether a probe runs.
+#[cfg(target_os = "linux")]
+pub fn start_focus(
+    cfg: &Config,
+    focus: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    ev: &Tx,
+) -> Res<bool> {
+    let probe = arrowhead_input::kwin::KwinProbe::start(cfg.safety.game_window_classes.clone());
+    run_focus(probe, cfg, focus, stop, ev)
+}
+
+#[cfg(windows)]
+pub fn start_focus(
+    cfg: &Config,
+    focus: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    ev: &Tx,
+) -> Res<bool> {
+    let probe = Ok(arrowhead_input::winfocus::WindowsProbe::new(
+        cfg.safety.game_window_classes.clone(),
+    ));
+    run_focus(probe, cfg, focus, stop, ev)
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 pub fn start_focus(cfg: &Config, _: Arc<AtomicBool>, _: Arc<AtomicBool>, ev: &Tx) -> Res<bool> {
     if cfg.safety.require_focus_guard {
         return Err("no focus probe on this OS yet (safety.require_focus_guard is on)".into());
@@ -223,7 +282,35 @@ pub fn permissions(cfg: &Config) -> Permissions {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+/// Setup step 1 on Windows: nothing to grant. SendInput and RegisterHotKey need no setup, but an
+/// elevated game ignores keys from a normal process, so the game check says so.
+#[cfg(windows)]
+pub fn permissions(cfg: &Config) -> Permissions {
+    let yes = |d: &str| Check {
+        ok: true,
+        detail: d.into(),
+    };
+    let game = match arrowhead_input::winfocus::running_game(&cfg.safety.game_window_classes) {
+        Some(n) => yes(&format!(
+            "game process running ({n}). If keys do nothing, the game may be running as administrator: run arrowhead the same way"
+        )),
+        None => Check {
+            ok: false,
+            detail: "Roblox is not running. Start the game, then check again".into(),
+        },
+    };
+    Permissions {
+        uinput: yes("key output uses SendInput (nothing to set up)"),
+        hotkeys: yes("hotkeys use RegisterHotKey (a key another program owns is skipped)"),
+        screencast: yes(&format!(
+            "capture backend: {:?} (DXGI first, Windows Graphics Capture as fallback)",
+            cfg.capture.windows_backend
+        )),
+        game,
+    }
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 pub fn permissions(_: &Config) -> Permissions {
     let no = |d: &str| Check {
         ok: false,

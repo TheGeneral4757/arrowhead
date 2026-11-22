@@ -88,3 +88,12 @@ WGC draws a yellow border unless borderless capture is granted; request it, and 
 - M2: `arrowhead-cli capture --seconds 10` prints fps, interval and pts-age percentiles from the real portal on KDE and Hyprland; `record` writes a clip that `replay` reads back bit-exact.
 - Capture of a 4 x 60 x 900 px region holds the monitor refresh rate with `copy_us_p99 < 500`.
 - Sober issue #2027 (16 fps while focused) is checked during M0 and its result written into [12](12-open-questions.md).
+
+## v0.2 Windows status (2026-11-22)
+Built and cross-checked (`cargo clippy --target x86_64-pc-windows-msvc`), never run on Windows.
+- `capture::dxgi::DxgiSource`: capture thread with D3D11 device on the output's own adapter (hybrid GPUs), primary monitor (the output at 0,0), `AcquireNextFrame` 50 ms (only bounds the stop check), `CopySubresourceRegion` of the region into a staging texture (recreated when the region size changes), `Map`, rows copied into the ring. pts = `LastPresentTime` through `qpc_ticks_to_ns` (same QPC clock as `Clock::now()`). Frames with `LastPresentTime == 0` (mouse only) are skipped. A non-BGRA8 desktop (HDR) is fatal for DXGI and falls to WGC.
+- ACCESS_LOST and other errors rebuild the duplication; 3 failures in 5 s (`winpolicy::FailureWindow`) close the ring with `Backend`. A mode change after a rebuild closes it with `SourceLost`.
+- `capture::wgc::WgcSource` (`windows-capture` 2.0, cursor off, border off requested, `MinimumUpdateInterval` 0, BGRA8): primary monitor or the first window whose process matches `safety.game_window_classes`. Region cropped with `Frame::buffer_crop` (allocates a staging texture per frame: fine for a fallback, not tuned). pts = `SystemRelativeTime` x 100 ns, assumed to be on the QPC clock.
+- `capture::WindowsSource` picks by `capture.windows_backend` (`winpolicy::backend_order`): `auto` = dxgi, wgc-monitor, wgc-window; a named backend does not fall back. In `auto`, a `Backend` error from the running source moves to the next backend in place (region kept); `SourceLost` and `PermissionDenied` go to the caller as before.
+- Departures: monitor choice is fixed to the primary monitor (no setting yet, see P9); no WGC border detection for Setup (P10).
+- Untested until a Windows machine runs it: everything above, in particular `cli capture` numbers (fps, pts age, copy time), the fallback, hybrid GPU, exclusive fullscreen.
