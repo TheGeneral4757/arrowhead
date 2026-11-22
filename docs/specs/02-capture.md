@@ -81,6 +81,7 @@ WGC draws a yellow border unless borderless capture is granted; request it, and 
 - `arrowhead-cli import <video> -o <clip> --region x,y,w,h [--start s] [--seconds s]` converts M0 screen recordings through ffmpeg (bgr0 rawvideo); pts = start + frame number / fps, so it suits constant-rate recordings only.
 - The portal session and its D-Bus connection are kept open for the life of the source (v2 dropped them after the handshake).
 - Frame pts comes from `SPA_META_Header`, requested with a `ParamMeta` update after the format is negotiated.
+- KWin sends frames only when the screen changes (damage-driven): a still desktop gave 2 fps with 10 s gaps, while moving content gave 6.06 ms intervals (165 Hz). Measure fps with the game playing. First run: pts age p50 2.0 ms, p99 7.0 ms.
 - Size: a 840x1440 playfield crop at 165 fps is about 42 MB/s on disk; lane-strip regions will be far smaller.
 
 ## Acceptance
