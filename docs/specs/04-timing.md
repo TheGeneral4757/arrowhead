@@ -62,7 +62,7 @@ The offset is shown on Live > Pipeline and stored per profile.
 ## Readback
 When the game's ms readout is readable ([03](03-detection.md#hud-reading-corehud-hud-thread-10-20-hz)):
 - Each new readout is matched to the most recent committed press whose send time is 30-400 ms before the readout appeared, same lane if the judgment position tells us the lane, else by time only. Unmatched reads are dropped.
-- Sign convention of the readout is unverified: set `readback.sign` during M0 by pressing deliberately late in a test song.
+- Sign convention: the game shows late hits as negative ms, so `readback_sign = -1` (confirmed, G4).
 - With readback normalised so positive = late: `game_bias -= 0.05 * (readback_ms - intended_style_error_ms)` per matched read, clamped to +/- 60 ms, starting from the profile's stored value. In Max mode this keeps the mean hit error at 0; in styled modes it keeps the intended distribution centred where the model put it.
 - Without readback, `game_bias` stays at its stored value; Setup offers a manual nudge (ms slider) and a guided "tap test" using results-screen judgments.
 

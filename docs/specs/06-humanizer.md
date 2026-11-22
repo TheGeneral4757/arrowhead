@@ -46,7 +46,7 @@ miss_n  ~ Bernoulli(miss_floor + miss_k * (c_n + j_n + s_n) / 3)
 ## Accuracy controller
 Goal: final song accuracy within +/- 0.5% of `target`, without visible sudden changes in play.
 
-1. **Feed-forward.** Expected accuracy for a given `k` is computed by integrating the error distribution over the judgment windows and an accuracy weight per judgment (`[game.accuracy_weights]`, unverified, default Sick 1.0, Good 0.75, Ok 0.5, Bad 0.25, Miss 0; replaced by a fitted formula once M0 measures it). Solve for the `k` that hits `target` before the song starts (bisection, k in [0.2, 4]).
+1. **Feed-forward.** Expected accuracy for a given `k` is computed by integrating the error distribution over the judgment windows and an accuracy weight per judgment (`[game.accuracy_weights]`, unverified, default Sick 1.0, Good 0.75, Ok 0.5, Bad 0.25, Miss 0; M0 found the game's accuracy is not count-weighted (likely per-hit ms, [12](12-open-questions.md) G2), so this is only a starting guess and feedback from the HUD readout does the real work; refit from per-hit ms readbacks in v0.2). Solve for the `k` that hits `target` before the song starts (bisection, k in [0.2, 4]).
 2. **Feedback.** Measured accuracy so far: the HUD accuracy readout if readable, else our own estimate from planned errors + readback. Projected final = measured weighted by notes played plus the feed-forward expectation for the rest. PI on `log k`: `Kp = 0.4`, `Ki = 0.05 per s`, update at most every 2 s, `k` changes at most 10% per update.
 3. **Misses** are not a controller knob; the miss rate comes from the style only.
 4. **Max** bypasses the model: `style_error = 0`, no misses, no drift, controller off.

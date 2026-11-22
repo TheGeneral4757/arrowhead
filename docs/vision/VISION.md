@@ -8,7 +8,7 @@ created: 2026-11-21
 A desktop tool that plays Funky Friday's 4-key mode for you by watching the screen and pressing keys. It is built for private servers with friends who know it is running. It plays either perfectly ("Max") or like a believable person at an accuracy you choose.
 
 ## Who it is for
-One user (the author) and friends, on Linux first (CachyOS, KDE Plasma 6 as the test target, Hyprland/Caelestia as the daily desktop), then Windows. Typical setup: game on one monitor, arrowhead on the other. A single monitor works too, with a click-through overlay.
+One user (the author) and friends, on Linux first (CachyOS, KDE Plasma 6 as the test target, Hyprland/Caelestia as the daily desktop), then Windows. Typical setup: game on one monitor, arrowhead on the other. The author plays at 2560x1440, 165 Hz. A single monitor works too, with a click-through overlay.
 
 ## What good looks like
 | Quality | Meaning |

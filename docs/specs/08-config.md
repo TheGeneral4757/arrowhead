@@ -61,8 +61,8 @@ min_gap_ms = 10
 
 [game]                       # unverified values, see specs/12
 windows_ms = { sick = 45, good = 80, ok = 130, bad = 230 }
-accuracy_weights = { sick = 1.0, good = 0.75, ok = 0.5, bad = 0.25, miss = 0.0 }
-readback_sign = 1            # +1 if the game's positive ms means late
+accuracy_weights = { sick = 1.0, good = 0.75, ok = 0.5, bad = 0.25, miss = 0.0 } # rough feed-forward only: real accuracy is not count-weighted (G2)
+readback_sign = -1           # game shows late as negative ms (confirmed, G4)
 
 [ui]
 overlay = "auto"             # auto (single monitor only) | on | off
@@ -80,11 +80,12 @@ per_note = false
 
 ```toml
 version = 1
-monitor = "DP-1"             # portal/DXGI output name
+monitor = "DP-2"             # portal/DXGI output name
 stream_size = [2560, 1440]
+refresh_hz = 165
 scale = 1.0
-side = "right"
-scroll = "down"
+side = "centre"              # centre (ours, default) | left | right
+scroll = "up"
 receptors = [[1702.4, 1288.1], [1846.0, 1288.3], [1989.7, 1288.0], [2133.2, 1288.2]]  # example values
 radius_px = 61.5
 nudge = { dx = 0, dy = 0, dpitch = 0.0, dwidth = 0.0 }

@@ -3,7 +3,7 @@
 Guidance for Claude Code in this repo.
 
 ## Project
-arrowhead: screen-reading Funky Friday (Roblox) autoplayer, 4K only, for private servers. Rust Cargo workspace + Tauri 2 app with a React/TS front end. Linux first (KDE Plasma 6 test target, Hyprland daily), Windows in v0.2. Successor to `~/GitHub/fnf-thing-v2` (reference code for the PipeWire, uinput, DXGI and SendInput backends).
+arrowhead: screen-reading Funky Friday (Roblox) autoplayer, 4-key ("4K") mode only, for private servers. Dev setup: game on a 2560x1440 165 Hz monitor (DP-2). Rust Cargo workspace + Tauri 2 app with a React/TS front end. Linux first (KDE Plasma 6 test target, Hyprland daily), Windows in v0.2. Successor to `~/GitHub/fnf-thing-v2` (reference code for the PipeWire, uinput, DXGI and SendInput backends).
 
 **Status:** docs only. Next milestone is M0 (game facts) then M1 (workspace + CI). See `docs/specs/11-roadmap.md`.
 

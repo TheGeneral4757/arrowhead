@@ -11,6 +11,12 @@ Turns frames into note observations (`NoteObs`) per lane, and finds the lane lay
 > [!warning] No assumptions from reference images
 > The images in `docs/research/ff-refs/` are rough examples (old YouTube thumbnails), not what the game looks like. Detection must not take any position, size, colour, shape, background or HUD placement from them. Everything below is learned from the user's own screen during calibration. The only structural facts assumed are: 4 lanes per player, 4 receptors in a straight row with equal spacing, notes move along the lane toward the receptor.
 
+> [!note] Confirmed on the user's screen (M0, 2026-11-21)
+> - Our playfield is always the larger group, horizontally centred. The opponent's is a smaller group on the right.
+> - Note heads have a different colour per lane (learned per lane, never fixed).
+> - Hold trails are a shade of grey in every lane (low chroma; one trail class for all lanes).
+> - Idle receptors are grey and light up in the lane colour on press.
+
 - Note and receptor shapes, colours and sizes vary by skin and settings; nothing about them is a constant.
 - The playfield background may be dark, busy or animated; the background model must cope with all three.
 
@@ -58,14 +64,15 @@ Runs in `Searching`, from `FrameSource::snapshot()` at 4 Hz, full frame downscal
 ### Side detection
 Which group is ours. In order:
 1. Profile's last side if the layout matches within 2% (same monitor and game window).
-2. Press correlation: while `Armed`, our receptors light up when we press. On the first committed presses, compare receptor-zone brightness change of both groups within 60 ms of each press. 3 agreeing presses decide.
-3. Ask in the UI (Setup step and a toast on Live).
+2. Centre rule (default `side = "centre"`): of the groups found, ours is the larger one whose centre x is nearest the game window's horizontal centre. Decides alone when exactly one group passes; otherwise confirm with step 3.
+3. Press correlation: while `Armed`, our receptors light up when we press. On the first committed presses, compare receptor-zone brightness change of both groups within 60 ms of each press. 3 agreeing presses decide.
+4. Ask in the UI (Setup step and a toast on Live).
 
-Until decided, plan presses for neither side; `Armed` waits. In dry run, use the user's own key presses (evdev, if readable) for step 2.
+Until decided, plan presses for neither side; `Armed` waits. In dry run, use the user's own key presses (evdev, if readable) for step 3.
 
 ### Colour learning
 - Heads: for each lane, collect pixels of the first 6 confirmed head runs (moving, right size, right lane); take the median (C1, C2, Y) and the 95th percentile distance as `head_tol` (clamped to config min/max). Before learning finishes, use a permissive "saturated or bright, not background" rule to find heads.
-- Trail colour: same, from runs behind heads that persist across 3+ frames. v2's grey (85, 85, 85) is the initial guess only.
+- Trail colour: same, from runs behind heads that persist across 3+ frames. Initial guess: low-chroma grey (|C1|, |C2| small, any luma), shared by all lanes; v2's (85, 85, 85) is one example.
 - Store learned colours in the profile. Re-learn when a song starts and the stored colours match under 50% of moving blobs (skin change).
 
 ### Manual nudge
@@ -90,11 +97,13 @@ Which elements exist, where they are and how they look is unknown until M0. Each
 
 | Element | Expected text pattern (verify in M0) | Method | Used for |
 |---|---|---|---|
-| ms readout | signed number + "ms" | Glyph templates | Timing readback ([04](04-timing.md#readback)) |
-| Judgment word | Sick / Good / Ok / Bad / Miss | Template per word | Readback, history |
-| Accuracy | number + "%" | Glyph templates | Controller ([06](06-humanizer.md)), history |
-| Scores (ours, opponent's) | "Score" + integer | Glyph templates | Match mode |
-| Song title + difficulty | free text | ocrs, once per song | History |
+| ms readout | signed number + "ms", under the judgment word | Glyph templates | Timing readback ([04](04-timing.md#readback)) |
+| Judgment word | Sick! / Good! / Ok / Bad / Miss, popup in our playfield (the opponent's shows near theirs) | Template per word | Readback, history |
+| Stats panel | "Accuracy: n.nn%", Highest Combo, Combo, Hits, Misses, "Mean MS: n.nn ms", KPS | Glyph templates | Controller ([06](06-humanizer.md)), history |
+| Judgment counts | "Sick: n" ... "Miss: n" | Glyph templates | History, readback check |
+| Scores (ours, opponent's) | bare signed integer next to each avatar, no label | Glyph templates | Match mode |
+| Song title + difficulty | "Pack - Song (Difficulty)" + time left | ocrs, once per song | History |
+| Results | "Stats from last song" panel | Template | `Results` state, history |
 
 ### Glyph templates
 - Atlas per profile (font size depends on resolution): digits 0-9, `.`, `-`, `%`, `:`, plus the words Sick, Good, Ok, Bad, Miss.

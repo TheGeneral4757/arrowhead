@@ -13,7 +13,7 @@ Goal: replace research guesses with measurements. Needs one private-server sessi
 | Track | Output |
 |---|---|
 | Sober frame rate | Is Sober issue #2027 (16 fps while focused on KDE Plasma 6) present on this box? Also on Hyprland? Workaround if any |
-| Record | 5+ songs recorded as full-monitor video (OBS or `gpu-screen-recorder`) at native refresh: downscroll, upscroll, holds, jacks, both sides, two skins. Converted to `.ahclip` once M2 exists |
+| Record | 5+ songs recorded as full-monitor video (OBS or `gpu-screen-recorder`) at native refresh: downscroll, upscroll, holds, jacks, both sides, one skin (the user only uses one). Converted to `.ahclip` once M2 exists |
 | Game facts | Answer every row of [12](12-open-questions.md): windows, ms readout sign, default keys, HUD elements and where they are, accuracy formula (from several results screens), scroll speed settings |
 | Overlay spike | Layer-shell surface above fullscreen Sober on KWin and Hyprland |
 | Focus spike | KWin script focus probe and Hyprland socket against Sober |
