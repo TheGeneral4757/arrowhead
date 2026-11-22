@@ -176,9 +176,18 @@ impl AuxTap {
     /// Producer helper for CPU backends: copies the due rects out of a full-stream view.
     pub fn copy_from(&self, n: u64, full: &FrameView) {
         if let Some(rects) = self.due(n) {
+            // A rect the buffer cannot hold in full (a short chunk) is skipped: `crop` must
+            // not panic on a capture thread.
+            let fits = |r: &Rect| {
+                let end = (r.y - full.region.y + r.h as i32 - 1) as usize * full.stride
+                    + (r.x - full.region.x) as usize * 4
+                    + r.w as usize * 4;
+                end <= full.data.len()
+            };
             let frames = rects
                 .iter()
                 .filter_map(|r| full.region.intersect(r))
+                .filter(fits)
                 .map(|r| full.crop(r))
                 .collect();
             self.deliver(frames);
@@ -250,6 +259,19 @@ mod tests {
         assert_eq!(fr[0].data, (20..28).collect::<Vec<u8>>());
         assert_eq!((fr[0].seq, fr[0].pts), (7, Nanos(5)));
         assert!(tap.wait(n, Duration::from_millis(1)).is_none());
+
+        // a buffer one byte short of the last row: that rect is skipped, no panic
+        let short = FrameView {
+            data: &full.data[..31],
+            ..full.view()
+        };
+        tap.request(vec![Rect::new(0, 1, 4, 1), Rect::new(0, 0, 1, 1)], 1);
+        tap.copy_from(3, &short);
+        let (_, fr) = tap.wait(n, Duration::ZERO).unwrap();
+        assert_eq!(
+            fr.iter().map(|f| f.region).collect::<Vec<_>>(),
+            [Rect::new(0, 0, 1, 1)]
+        );
     }
 
     #[test]
