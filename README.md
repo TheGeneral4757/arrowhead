@@ -6,7 +6,7 @@ A screen-reading autoplayer for Funky Friday (Roblox), for private servers with 
 
 Successor to fnf-thing-v2. Rewritten from scratch in Rust.
 
-> **Status: planning.** Specs are written; no code yet. See [the roadmap](docs/specs/11-roadmap.md).
+> **Status: v0.1 in progress.** The Linux app and CLI play from the screen (M5). See [the roadmap](docs/specs/11-roadmap.md).
 
 > **Risk.** Automating input in Roblox breaks its Terms of Use and can get an account banned. arrowhead is for private servers with people who know. You carry the risk.
 
@@ -23,6 +23,15 @@ Successor to fnf-thing-v2. Rewritten from scratch in Rust.
 | UI | Tauri 2 app: Live, Setup, Settings | + Style, History, click-through overlay |
 
 4 keys only. No telemetry. The only network call is the update check, which can be turned off.
+
+## Install (Linux)
+
+| Way | How |
+|---|---|
+| Tarball | Download `arrowhead-X.Y.Z-linux-x86_64.tar.gz` from the releases, unpack, run `./arrowhead` (the app) or `./arrowhead-cli` |
+| AUR | `arrowhead-bin` (updates come from your package manager) |
+
+Runtime deps: webkit2gtk-4.1, libsoup3, gtk3, pipewire, xdg-desktop-portal plus a backend (`xdg-desktop-portal-kde` or `xdg-desktop-portal-hyprland`). Key output needs a writable `/dev/uinput`. First run: open Setup and go through Permissions, Screen, Calibrate, Latency and Keys.
 
 ## Docs
 

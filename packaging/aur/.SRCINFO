@@ -1,0 +1,20 @@
+pkgbase = arrowhead-bin
+	pkgdesc = Screen-reading Funky Friday (Roblox) autoplayer for private servers
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/TheGeneral4757/arrowhead
+	arch = x86_64
+	license = MIT
+	depends = webkit2gtk-4.1
+	depends = libsoup3
+	depends = gtk3
+	depends = pipewire
+	depends = xdg-desktop-portal
+	optdepends = xdg-desktop-portal-kde: screen capture and hotkeys on KDE Plasma
+	optdepends = xdg-desktop-portal-hyprland: screen capture and hotkeys on Hyprland
+	provides = arrowhead
+	conflicts = arrowhead
+	source = https://github.com/TheGeneral4757/arrowhead/releases/download/v0.1.0/arrowhead-0.1.0-linux-x86_64.tar.gz
+	sha256sums = SKIP
+
+pkgname = arrowhead-bin

@@ -9,6 +9,7 @@ Full detail lives in [docs/specs/](docs/specs/00-index.md). This page is the map
 | `arrowhead-core` | lib | Frame types, detection, tracking, timing, scheduler, player model, session state machine, config types, runtime (threads over traits), platform scheduling shim | `libc` / `windows` only in `runtime::platform` |
 | `arrowhead-capture` | lib | `FrameSource` backends: PipeWire (Linux), DXGI + WGC (Windows), clip replay, clip recorder | ashpd, pipewire, windows-capture |
 | `arrowhead-input` | lib | `KeySink` backends (uinput, SendInput, null), `FocusProbe` backends, global hotkeys | evdev, zbus, windows |
+| `arrowhead-runner` | lib | The live run shared by app and CLI: calibrate, scan/scheduler threads, hotkeys, focus, latency test, permission checks; reports `EngineEvent`s | via input |
 | `arrowhead-app` | bin | Tauri 2 shell, commands, event bridge to the React UI in `ui/` | tauri |
 | `arrowhead-overlay` | bin | Click-through overlay process (layer-shell on Wayland, layered window on Windows) | sctk, tiny-skia, windows |
 | `arrowhead-cli` | bin | Headless run, record, replay, detect, bench, diagnostics | none beyond the libs |

@@ -18,6 +18,7 @@ arrowhead/
     input/     arrowhead-input
     app/       arrowhead-app      (Tauri 2; tauri.conf.json here)
     overlay/   arrowhead-overlay
+    runner/    arrowhead-runner   (the live run shared by app and cli)
     cli/       arrowhead-cli      (binary name: arrowhead-cli)
   ui/                     React + TS + Vite front end for the app
   tests/
@@ -58,6 +59,10 @@ M1 notes (2026-11-21):
 - UI: TypeScript stays on 6.0 because typescript-eslint 8 does not support 7 yet.
 - The Tauri CLI does not look outside `ui/` for `crates/app/tauri.conf.json`, so `npm run tauri` goes through `ui/scripts/tauri.mjs`, which sets `TAURI_APP_PATH`.
 - `arrowhead-cli` uses clap 4.6 from M2. M2 added toml 1, toml_edit 0.25, dirs 7, zstd 0.14, libc, ashpd 0.14, pipewire 0.10, tokio 1, tempfile 3 (dev).
+
+M5 notes (2026-11-22):
+- `arrowhead-runner` holds the live run (calibrate, play, latency test) so `cli run` and the app drive the same engine (spec 07 acceptance). The CLI prints its `EngineEvent`s; the app forwards them to the UI.
+- App adds tauri-plugin-updater 2.12, tauri-plugin-window-state 2.4 and png. No tracing yet: the app writes its own daily log files (spec 08).
 
 Not used: xcap, scap, rdev, opencv, tesseract, AVX2 intrinsics (strips are small; scalar code is fast enough, see [03](03-detection.md#performance-budget)).
 

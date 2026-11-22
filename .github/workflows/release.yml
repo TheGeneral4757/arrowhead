@@ -1,0 +1,129 @@
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build, e.g. v0.1.0
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - id: v
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libgtk-3-dev libpipewire-0.3-dev clang libxkbcommon-dev libwayland-dev
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: npm ci
+        working-directory: ui
+
+      # tauri build runs the UI build first (beforeBuildCommand); --no-bundle: the tarball is ours.
+      - name: Build app, cli, overlay
+        run: |
+          npm --prefix ui run tauri build -- --no-bundle
+          cargo build --release -p arrowhead-cli -p arrowhead-overlay
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          name="arrowhead-${VERSION}-linux-x86_64"
+          mkdir -p "dist/$name"
+          cp target/release/arrowhead target/release/arrowhead-cli target/release/arrowhead-overlay "dist/$name/"
+          cp LICENSE README.md packaging/arrowhead.desktop "dist/$name/"
+          cp crates/app/icons/128x128.png "dist/$name/arrowhead.png"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          echo "ASSET=$name.tar.gz" >> "$GITHUB_ENV"
+
+      # The updater manifest (spec 10). --no-bundle makes no updater artifacts, so the tarball
+      # is signed here with the updater key.
+      - name: Sign and write latest.json
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          cd dist
+          ../ui/node_modules/.bin/tauri signer sign "$ASSET"
+          notes="$(gh release view "$TAG" --json body -q .body 2>/dev/null || true)"
+          jq -n \
+            --arg version "$VERSION" \
+            --arg notes "$notes" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg signature "$(cat "$ASSET.sig")" \
+            --arg url "https://github.com/${{ github.repository }}/releases/download/$TAG/$ASSET" \
+            '{version: $version, notes: $notes, pub_date: $pub_date, platforms: {"linux-x86_64": {signature: $signature, url: $url}}}' \
+            > latest.json
+          sha256sum "$ASSET" latest.json > SHA256SUMS
+
+      - name: Upload to the release
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          gh release upload "$TAG" dist/"$ASSET" dist/"$ASSET".sig dist/latest.json dist/SHA256SUMS --clobber
+
+  # Windows (v0.2): tauri build with the MSI bundler, plus a portable zip.
+
+  aur:
+    needs: linux
+    runs-on: ubuntu-24.04
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      VERSION: ${{ needs.linux.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Bump PKGBUILD
+        run: |
+          gh release download "$TAG" -p SHA256SUMS
+          sum="$(grep "linux-x86_64.tar.gz$" SHA256SUMS | cut -d' ' -f1)"
+          sed -i -e "s/^pkgver=.*/pkgver=$VERSION/" -e "s/^pkgrel=.*/pkgrel=1/" -e "s/^sha256sums=.*/sha256sums=('$sum')/" packaging/aur/PKGBUILD
+          sed -i -e "s/pkgver = .*/pkgver = $VERSION/" -e "s/pkgrel = .*/pkgrel = 1/" -e "s/sha256sums = .*/sha256sums = $sum/" \
+            -e "s#arrowhead-[0-9][^/]*-linux-x86_64.tar.gz#arrowhead-$VERSION-linux-x86_64.tar.gz#g" \
+            -e "s#download/v[^/]*/#download/v$VERSION/#g" packaging/aur/.SRCINFO
+          rm SHA256SUMS
+      - name: Open a PR
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="aur-$VERSION"
+          git checkout -b "$branch"
+          git commit -am "chore(aur): arrowhead-bin $VERSION"
+          git push origin "$branch"
+          gh pr create --title "chore(aur): arrowhead-bin $VERSION" --body "Bumps pkgver and sha256sums for $TAG."
+      # Publishing to the AUR is off until an AUR_SSH_KEY secret exists (spec 10), e.g. with
+      # KSXGitHub/github-actions-deploy-aur pointed at packaging/aur/PKGBUILD.

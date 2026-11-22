@@ -62,6 +62,14 @@ When there is only one monitor (or the user chooses), the main window minimises 
 - Content: strip boxes, receptor marks, planned press ticks, last judgment, hit error bar, state pill. Off by default on two-monitor setups.
 - Spike first (M0/v0.2): does a layer-shell surface show above fullscreen Sober on KWin and Hyprland?
 
+## M5 notes (2026-11-22)
+- Commands as built: the list above minus the v0.2 ones (`list_styles`, `select_style`, `save_style`, `history`), plus `app_info`, `get_profile`, `latency_key`, `test_lane(lane)`. The contract is `ui/src/api.ts`.
+- `nudge_layout` sets the profile's absolute nudge (not a delta); the runner applies it on top of the detected layout. `dpitch` spreads the receptors per lane around the centre, `dwidth` grows the receptor size. A fresh detection that moves the receptors resets it.
+- Latency step: the app window is the test window. Rust emits `latency-paint` (bool) to paint it; the UI turns it white on any keydown and calls `latency_key`.
+- Events are sent as batches of `EngineEvent` (core `event.rs`): `Notes` (latest only) every 16 ms, the rest every 33 ms. `Readback`, `Stats` and `Song` wait for the HUD reader (v0.2), so Live shows accuracy, judgments, hit error and the song title as empty states. `Pipeline` is 1 Hz.
+- Session states come from `session::Session`: Searching while calibrating, Armed with a layout, Playing while confirmed heads exist, back to Armed after 3 s without one (no history in v0.1). Dry run is a scheduler gate, so it can be toggled while playing; without a writable uinput the app plays dry only.
+- Minimise on `Playing` waits for the overlay (v0.2). Window size and position are remembered (window-state plugin).
+
 ## Acceptance
 - M5: the app drives the same engine as the CLI; Live updates at 30 Hz with under 3% CPU for the webview on the dev machine; Setup completes from a clean config.
 - Every number shown is measured (no placeholder figures in release builds).

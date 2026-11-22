@@ -5,7 +5,7 @@ Guidance for Claude Code in this repo.
 ## Project
 arrowhead: screen-reading Funky Friday (Roblox) autoplayer, 4-key ("4K") mode only, for private servers. Dev setup: game on a 2560x1440 165 Hz monitor (DP-2). Rust Cargo workspace + Tauri 2 app with a React/TS front end. Linux first (KDE Plasma 6 test target, Hyprland daily), Windows in v0.2. Successor to `~/GitHub/fnf-thing-v2` (reference code for the PipeWire, uinput, DXGI and SendInput backends).
 
-**Status:** M0-M3 merged. M4 (timing, input, safety) on branch `m4`: tracker, planner, scheduler, uinput sink, KWin focus probe, portal hotkeys, exit/panic hooks, `cli latency` and `cli run` built; live runs work with a hand-set offset (-5.2 ms in the profile's `latency.game_bias_ms`). Readback moved to v0.2 with the HUD reader. See `docs/specs/04-timing.md` (M4 status) and `11-roadmap.md`.
+**Status:** M0-M4 merged. M4 (timing, input, safety): tracker, planner, scheduler, uinput sink, KWin focus probe, portal hotkeys, exit/panic hooks, `cli latency` and `cli run` built; live runs work with a hand-set offset (-5.2 ms in the profile's `latency.game_bias_ms`). Readback moved to v0.2 with the HUD reader. M5 (Linux app) on branch `m5`: the live run moved to `arrowhead-runner` (shared by CLI and app), app commands + event bus, Live/Setup/Settings pages, release workflows and PKGBUILD; manual checklist on KDE/Hyprland still to do. See `docs/specs/04-timing.md`, `07-app-ui.md` (M5 notes) and `11-roadmap.md`.
 
 ## Where things are
 | Need | Read |
