@@ -1,0 +1,27 @@
+# Maintainer: TheGeneral4757
+pkgname=arrowhead-bin
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Screen-reading Funky Friday (Roblox) autoplayer for private servers"
+arch=('x86_64')
+url="https://github.com/TheGeneral4757/arrowhead"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'libsoup3' 'gtk3' 'pipewire' 'xdg-desktop-portal')
+optdepends=('xdg-desktop-portal-kde: screen capture and hotkeys on KDE Plasma'
+            'xdg-desktop-portal-hyprland: screen capture and hotkeys on Hyprland')
+provides=('arrowhead')
+conflicts=('arrowhead')
+source=("$url/releases/download/v$pkgver/arrowhead-$pkgver-linux-x86_64.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+  cd "arrowhead-$pkgver-linux-x86_64"
+  install -Dm755 arrowhead "$pkgdir/usr/bin/arrowhead"
+  install -Dm755 arrowhead-cli "$pkgdir/usr/bin/arrowhead-cli"
+  install -Dm755 arrowhead-overlay "$pkgdir/usr/lib/arrowhead/arrowhead-overlay"
+  # The app reads this and leaves updates to the package manager (spec 10).
+  echo aur | install -Dm644 /dev/stdin "$pkgdir/usr/lib/arrowhead/packaged"
+  install -Dm644 arrowhead.desktop "$pkgdir/usr/share/applications/arrowhead.desktop"
+  install -Dm644 arrowhead.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/arrowhead.png"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

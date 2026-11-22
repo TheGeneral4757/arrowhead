@@ -1,0 +1,149 @@
+// Front end <-> Rust contract (spec 07, Tauri commands and events). Mirrors crates/app/src/main.rs
+// and crates/core/src/event.rs; change both sides together.
+import { Channel, invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+
+export type SessionState = "Idle" | "Searching" | "Armed" | "Playing" | "Results" | "Paused";
+export type Scroll = "up" | "down";
+export type KeySet = "wasd" | "arrows" | "custom";
+export type AutoOnOff = "auto" | "on" | "off";
+
+export type Dot = { id: number; lane: number; y: number; tail: boolean };
+export type Pipeline = {
+  fps: number;
+  interval_p50_ms: number;
+  interval_p99_ms: number;
+  pts_age_ms: number;
+  scan_us_p99: number;
+  late_us_p99: number;
+  offset_ms: number;
+  speed_px_ms: number;
+  presses: number;
+  missed_by_engine: number;
+  suppressed: number;
+  watchdog: number;
+};
+
+// All *_ms times are monotonic milliseconds on one clock (t_ms of Notes is "now").
+export type EngineEvent =
+  | { type: "State"; state: SessionState; dry_run: boolean; reason: string }
+  | { type: "Layout"; receptors: [number, number][]; size: number; scroll: Scroll; stream: [number, number]; profile: string }
+  | { type: "Notes"; t_ms: number; dots: Dot[] }
+  | { type: "Planned"; id: number; lane: number; at_ms: number; release_ms: number }
+  | { type: "Pressed"; id: number; lane: number; planned_ms: number; actual_ms: number }
+  | { type: "Released"; id: number; lane: number; planned_ms: number; actual_ms: number }
+  | { type: "Suppressed"; id: number; lane: number; reason: "focus" | "paused" | "dry_run" }
+  | ({ type: "Pipeline" } & Pipeline)
+  | { type: "Focus"; focused: boolean | null }
+  | { type: "Hotkeys"; bound: string | null; error: string | null }
+  | { type: "Log"; level: "info" | "warn" | "error"; text: string }
+  | { type: "Stopped"; error: string | null };
+
+export type SourceInfo = {
+  width: number;
+  height: number;
+  refresh_hz: number;
+  backend: string;
+  monitor: string;
+  scale: number;
+  pts_is_receive_time: boolean;
+};
+
+export type AppInfo = { version: string; os: string; packaged: string | null };
+
+export type Status = {
+  running: boolean;
+  state: SessionState;
+  dry_run: boolean;
+  paused: boolean;
+  capture: SourceInfo | null;
+  profile: string;
+  focus: boolean | null;
+  update: UpdateInfo | null;
+};
+
+export type Config = {
+  version: number;
+  profile: string;
+  style: string;
+  keys: { set: KeySet; custom: [string, string, string, string] };
+  hotkeys: { toggle: string; panic: string; nudge_up: string; nudge_down: string; cycle_style: string };
+  safety: { dry_run: boolean; require_focus_guard: boolean; max_hold_ms: number; game_window_classes: string[] };
+  capture: { linux_source: "monitor" | "window"; windows_backend: "auto" | "dxgi" | "wgc-monitor" | "wgc-window" };
+  timing: { commit_ms: number; late_limit_ms: number; tap_hold_ms: number; min_gap_ms: number };
+  game: unknown;
+  ui: { overlay: AutoOnOff; minimise_while_playing: AutoOnOff };
+  updates: { check: boolean };
+  log: { level: string; per_note: boolean };
+};
+type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] };
+
+export type Layout = {
+  receptors: [number, number][];
+  size: number;
+  run_len: number[];
+  run_shape: number[][];
+  scroll: Scroll;
+  stream: [number, number];
+};
+export type Nudge = { dx: number; dy: number; dpitch: number; dwidth: number };
+export type Profile = {
+  monitor: string;
+  stream_size: [number, number];
+  refresh_hz: number;
+  scale: number;
+  scroll: Scroll;
+  receptors: [number, number][];
+  radius_px: number;
+  nudge: Nudge;
+  latency: { capture_ms: number; input_ms: number; game_bias_ms: number };
+  layout?: Layout;
+  colours?: unknown;
+};
+
+export type Check = { ok: boolean; detail: string };
+export type Permissions = { uinput: Check; hotkeys: Check; screencast: Check; game: Check };
+/** `png` is a data: URL of the full-stream snapshot; the layout is drawn over it by the UI. */
+export type Calibration = { layout: Layout; nudge: Nudge; png: string; colours_learned: boolean; trail_learned: boolean };
+export type LatencyResult = { trials: number; input_ms_p50: number; input_ms_p90: number; includes_capture: boolean };
+export type UpdateInfo = { version: string; notes: string | null; can_install: boolean };
+
+export const api = {
+  appInfo: () => invoke<AppInfo>("app_info"),
+  getStatus: () => invoke<Status>("get_status"),
+  /** Opens the capture (portal picker on first use), calibrates and plays until stopped. */
+  startEngine: (onEvents: (batch: EngineEvent[]) => void, dryRun: boolean) => {
+    const ch = new Channel<EngineEvent[]>();
+    ch.onmessage = onEvents;
+    return invoke<void>("start_engine", { onEvent: ch, dryRun });
+  },
+  stopEngine: () => invoke<void>("stop_engine"),
+  setPaused: (paused: boolean) => invoke<void>("set_paused", { paused }),
+  panic: () => invoke<void>("panic"),
+  setDryRun: (dryRun: boolean) => invoke<void>("set_dry_run", { dryRun }),
+  getConfig: () => invoke<Config>("get_config"),
+  /** Deep-merges `patch` into the config, saves it and returns the result. */
+  setConfig: (patch: DeepPartial<Config>) => invoke<Config>("set_config", { patch }),
+  listProfiles: () => invoke<string[]>("list_profiles"),
+  selectProfile: (name: string) => invoke<void>("select_profile", { name }),
+  getProfile: () => invoke<Profile>("get_profile"),
+  setupPermissions: () => invoke<Permissions>("run_setup_step", { step: "permissions" }),
+  /** Opens (or re-opens) the portal picker. */
+  setupScreen: () => invoke<SourceInfo>("run_setup_step", { step: "screen" }),
+  /** Needs a song playing. Finds receptors, learns colours, saves the profile. Takes 5-40 s. */
+  setupCalibrate: () => invoke<Calibration>("run_setup_step", { step: "calibrate" }),
+  /** Latency test: the UI shows a full-window panel, paints it on "latency-paint" events,
+   * turns it white on any keydown and calls latencyKey(). Resolves when the trials are done. */
+  setupLatency: () => invoke<LatencyResult>("run_setup_step", { step: "latency" }),
+  latencyKey: () => invoke<void>("latency_key"),
+  onLatencyPaint: (f: (white: boolean) => void): Promise<UnlistenFn> =>
+    listen<boolean>("latency-paint", (e) => f(e.payload)),
+  /** Sends one tap of `lane` (0-3) after a 2 s countdown, for the Keys step. */
+  testLane: (lane: number) => invoke<void>("test_lane", { lane }),
+  calibrationSnapshot: () => invoke<Calibration>("calibration_snapshot"),
+  nudgeLayout: (n: Nudge) => invoke<Calibration>("nudge_layout", n),
+  copyDiagnostics: () => invoke<string>("copy_diagnostics"),
+  openLogsFolder: () => invoke<void>("open_logs_folder"),
+  checkUpdate: () => invoke<UpdateInfo | null>("check_update"),
+  installUpdate: () => invoke<void>("install_update"),
+};

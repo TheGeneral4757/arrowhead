@@ -184,9 +184,9 @@ fn main() -> ExitCode {
         } => open_screen().and_then(|mut src| {
             run::run(
                 &mut src,
-                run::Opts {
+                arrowhead_runner::Opts {
                     live,
-                    seconds,
+                    seconds: Some(seconds),
                     offset_ms,
                     learn_s: learn,
                     relearn,

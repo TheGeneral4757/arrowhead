@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=arrowhead
+Comment=Funky Friday autoplayer for private servers
+Exec=arrowhead
+Icon=arrowhead
+Terminal=false
+Categories=Game;Utility;

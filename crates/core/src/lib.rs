@@ -4,6 +4,7 @@
 pub mod config;
 pub mod detect;
 pub mod engine;
+pub mod event;
 pub mod frame;
 pub mod input;
 pub mod plan;

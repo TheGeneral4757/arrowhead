@@ -14,8 +14,11 @@ repository = "https://github.com/TheGeneral4757/arrowhead"
 arrowhead-core = { path = "crates/core" }
 arrowhead-capture = { path = "crates/capture" }
 arrowhead-input = { path = "crates/input" }
+arrowhead-runner = { path = "crates/runner" }
 tauri = "2.12"
 tauri-build = "2.7"
+tauri-plugin-updater = "2.12"
+tauri-plugin-window-state = "2.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "1"

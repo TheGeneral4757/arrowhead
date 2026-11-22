@@ -13,6 +13,7 @@ Visual reference: [design-review.html](../vision/design-review.html) (Layout 1, 
 - Dark only. Fonts: Host Grotesk (UI), Atkinson Hyperlegible Mono (numbers), bundled locally (no Google Fonts call at runtime: no network rule).
 - Colour roles: amber (`--color-accent`) for things the user sets, cool blue (`--color-cool`) for measured values. Judgment colours from `--judge-*`.
 - Window: 1100 x 760 default, min 900 x 600. Remembers size and position.
+- Scales with the window: the root font size runs from 16px (1280 x 800 and smaller) to 20px (2560 x 1440 and larger), whichever axis is smaller deciding; spacing, radii and control sizes are in rem so the whole UI scales with it. The lane canvas fills the window height. Content is capped at `--container` (90rem) and centred, so wider windows grow the gutters, not the grids.
 
 ## Layout 1: sidebar + pages
 Top bar: logo + name, state pill (Idle / Searching / Armed / Playing / Paused / Dry run), capture pill (backend + monitor), focus pill. Sidebar: pages with number keys 1-5; footer shows version, OS and active profile.
@@ -61,6 +62,14 @@ When there is only one monitor (or the user chooses), the main window minimises 
 - Windows: `WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE`.
 - Content: strip boxes, receptor marks, planned press ticks, last judgment, hit error bar, state pill. Off by default on two-monitor setups.
 - Spike first (M0/v0.2): does a layer-shell surface show above fullscreen Sober on KWin and Hyprland?
+
+## M5 notes (2026-11-22)
+- Commands as built: the list above minus the v0.2 ones (`list_styles`, `select_style`, `save_style`, `history`), plus `app_info`, `get_profile`, `latency_key`, `test_lane(lane)`. The contract is `ui/src/api.ts`.
+- `nudge_layout` sets the profile's absolute nudge (not a delta); the runner applies it on top of the detected layout. `dpitch` spreads the receptors per lane around the centre, `dwidth` grows the receptor size. A fresh detection that moves the receptors resets it.
+- Latency step: the app window is the test window. Rust emits `latency-paint` (bool) to paint it; the UI turns it white on any keydown and calls `latency_key`.
+- Events are sent as batches of `EngineEvent` (core `event.rs`): `Notes` (latest only) every 16 ms, the rest every 33 ms. `Readback`, `Stats` and `Song` wait for the HUD reader (v0.2), so Live shows accuracy, judgments, hit error and the song title as empty states. `Pipeline` is 1 Hz.
+- Session states come from `session::Session`: Searching while calibrating, Armed with a layout, Playing while confirmed heads exist, back to Armed after 3 s without one (no history in v0.1). Dry run is a scheduler gate, so it can be toggled while playing; without a writable uinput the app plays dry only.
+- Minimise on `Playing` waits for the overlay (v0.2). Window size and position are remembered (window-state plugin).
 
 ## Acceptance
 - M5: the app drives the same engine as the CLI; Live updates at 30 Hz with under 3% CPU for the webview on the dev machine; Setup completes from a clean config.
