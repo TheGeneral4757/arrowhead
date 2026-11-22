@@ -132,7 +132,8 @@ A face is a font style with its own glyph shapes: the stats panel and the counts
 1. Stats and counts: text lines that form a stack of 7 (5) left-aligned rows of similar height and regular pitch. Once labels are taught the first rows are verified against them.
 2. ms readout: of the remaining lines (and unions of neighbouring pieces, since the ms font is wide-spaced), the first one centred inside our playfield (`HudReader::set_playfield`: one receptor pitch beyond the outer lanes) that reads as a valid `ms` string with the Ms face. The opponent's readout, near their playfield, is never taken for ours. Without a playfield no ms readout is located. Until we have hit a note none is on screen, so locating the ms readout is retried while playing until it is found.
 3. Scores: remaining lines that read as integers with the Score face; the two tallest, split left and right by the frame middle. An avatar touching the number is dropped by its poor match, and the stored rect hugs the digits.
-4. Results: a stack of 6 and a stack of 4 whose labels match with the Results face.
+4. Results: a stack of 6 and a stack of 4 whose labels match with the Results face. Not used live yet: the history row takes accuracy and counts from the in-song panels (last read before the song ended), which are read every tick and taught all song, while the results face misread accuracy on a held-out screen.
+5. Digits 1-9 live (the hud thread): when Hits does not read, was known on the previous tick, and exactly one press went out from 200 ms before that tick until this one (a chord would add two), Hits shows one more; `teach_row` teaches it and keeps it only if the row then reads back as that value. The counts panel shares the font, so its digits come with it.
 Regions go to the profile's `[hud]` ([08](08-config.md)). Missing elements disable what needs them; nothing else breaks.
 
 ### Teaching the atlas (bootstrap)

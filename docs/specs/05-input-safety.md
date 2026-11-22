@@ -101,3 +101,6 @@ Built and cross-checked for `x86_64-pc-windows-msvc`, never run on Windows. Pure
 - S2: `install_exit_hooks` adds `SetConsoleCtrlHandler` (sets `EXIT`; for close/logoff/shutdown waits 300 ms) and a hidden top-level window that sets `EXIT` on `WM_ENDSESSION` (message-only windows do not receive it). SIGKILL-equivalent (TerminateProcess) cannot run hooks and there is no kernel-side release like uinput's: a key could stay down until the next key event. The scheduler's S1 watchdog does not help after the process is gone.
 - Departure: spec said the probe matches only `RobloxPlayerBeta.exe`; it matches the whole `game_window_classes` list.
 - Untested: all of it. Open: P7 (anti-cheat), P11 (elevated game).
+
+## v0.2 status (hotkeys)
+Cycle preset (F11) moves to the next style in `list_styles`, saves it as `config.toml` `style` and plays it from the next note. Nudge (F9/F10) moves the style's target by 0.5% while a style plays, else the offset by 1 ms as before.

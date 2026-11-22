@@ -38,5 +38,7 @@ Status (2026-11-22): done. v0.1.0 released; manual checklist passed on KDE and H
 ## v0.2.0: Windows, player model, history, overlay
 Tracks: DXGI + WGC capture; SendInput + Windows focus/hotkeys; player model + controller + presets ([06](06-humanizer.md)); HUD reader (glyph atlas, accuracy, scores, readback); Style and History pages; match my friend; overlay process; MSI build.
 
+Status (2026-11-23, branch `v0.2`, draft PR #12): built and reviewed: player model, controller and presets; HUD reader with live teaching and readback; history rows; Style and History pages; Live accuracy panel; overlay process; Windows capture, input, focus, hotkeys and MSI job; HUD side copies from every capture backend. Not done: match my friend (needs the opponent's numbers in the engine), song title (needs OCR), results-panel reading in the app. Untested until the user runs them: everything against the real game and desktop (readback, teaching, overlay above Sober, Windows as a whole); manual checklist rows 10-11.
+
 ## v0.3.0 and later (unordered)
 AUR publish automation; libei input fallback; DMA-BUF capture if measurements need it; Hallmark lint hook; landing page.
