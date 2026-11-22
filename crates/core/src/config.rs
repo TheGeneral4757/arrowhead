@@ -333,6 +333,9 @@ pub struct Profile {
     /// Learned head and trail colours; absent until calibration ran.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub colours: Option<crate::detect::Colours>,
+    /// Full receptor layout from the last calibration; lets a run skip the receptor search.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layout: Option<crate::detect::Layout>,
     pub detect: crate::detect::DetectConfig,
 }
 
@@ -352,6 +355,7 @@ impl Default for Profile {
             latency: Latency::default(),
             hud: HudRegions::default(),
             colours: None,
+            layout: None,
             detect: Default::default(),
         }
     }

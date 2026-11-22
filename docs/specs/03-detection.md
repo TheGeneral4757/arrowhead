@@ -59,7 +59,7 @@ For each strip row, `fill = matching_pixels / w` per class. A row is "head" if `
 Runs in `Searching`, from `FrameSource::snapshot()` at 4 Hz, full frame downscaled 2x.
 
 ### Receptor finding
-1. Per-pixel median luma of 9 snapshots spread over the first seconds, downscaled 2x (moving notes and brief presses drop out: stillness). Mask pixels that differ from the local mean (box radius h/12) by more than 30. Connected components; keep blobs with bbox area 0.1-5% of frame height squared, fill >= 20% of the bbox, aspect <= 2.
+1. Per-pixel "still" luma of 25 snapshots spread over ~6 s, downscaled 2x: for a pixel with grey samples (chroma under 40), the most common grey luma (16 bins); otherwise the median. Idle receptors are grey and do not change, notes are coloured and their outlines move, so in dense charts a receptor uncovered in a few snapshots still shows (a plain median of 9 gave the notes on the user's Maniac jack clip). Mask pixels that differ from the local mean (box radius h/12) by more than 30, then close 2 px gaps per class (outlines of passing notes split receptors). Connected components; keep blobs with bbox area 0.1-5% of frame height squared, fill >= 20% of the bbox, aspect <= 2.
 2. Find rows where 4 blobs share a bbox-centre y (within 2% of height), have similar size (sqrt of pixel count within 15%, so rotated arrows match) and equal spacing (pitch deviation under 8%, pitch 0.9-3x the blob size). There may be one or two such groups (one per player); do not assume where on screen they sit.
 3. Pick groups greedily by spacing regularity, each blob in one group only.
 4. `scroll`: from the sign of note motion once heads move along the strips (tracker, [04](04-timing.md)). Until then, guess from which side of the receptors has more room on screen, and plan no presses until 3 notes confirm the direction.
@@ -72,6 +72,8 @@ Which group is ours. In order:
 3. Press correlation (M4, needs input): while `Armed`, our receptors light up when we press. On the first committed presses, compare receptor-zone brightness change of both groups within 60 ms of each press. 3 agreeing presses decide.
 4. Ask in the UI (Setup step and a toast on Live).
 
+Receptors do not move between songs on one display. When the profile matches the display and holds a layout and colours, a run skips the receptor search and colour learning and only learns the stage background (median over 1.5 s; the detector keeps adapting it). If no group is found on a full calibration, the saved receptor positions are used. `--relearn` forces both a fresh search and fresh colours.
+
 Until decided, plan presses for neither side; `Armed` waits. In dry run, use the user's own key presses (evdev, if readable) for step 3.
 
 ### Colour learning
@@ -79,9 +81,10 @@ Until decided, plan presses for neither side; `Armed` waits. In dry run, use the
 - Foreground while learning: "saturated or bright, not background" (`|C1| + |C2| > learn_chroma` or luma differs from the background by more than `bg_tol`).
 - Heads: foreground runs at the detector's `head_fill`, 0.3-1.6x the receptor size, not cut by the strip ends, clear of the receptor zone and not inside a long (hold) run. A grey run whose luma is within `2 * bg_tol` of the background is animated background and is skipped. Per lane: the head colour is the median of the densest cluster of run colours (trail pieces, glow or background can make a sizeable minority, and a per-channel median of a mixture is no colour at all); `head_tol` = 95th percentile pixel distance of the cluster (clamped); `head_len` = most common run length (+/- 3 px), not the median, which merged jacks drag up. Needs 6 runs per lane (each frame a note is visible counts).
 - Trail colour: from foreground runs (at `trail_fill`, so a trail is one run) at least 1.8x the receptor size; only rows whose middle half of the strip is mostly pixels clearly off the background (`2 * bg_tol` or saturated), and only those middle-half pixels (popups and neighbours reach the strip edges, a trail always fills the middle). Pixels matching any head are dropped; colour = median of the densest cluster. Needs 3 such runs and 200 pixels, and must stand clear of the median background (else no trail colour). Shared by all lanes. On the user's skin it learns exactly (85, 85, 85).
-- Learning runs over a fixed window (the CLI: `--learn`, by recorded time). Stopping as soon as some counts are reached can end before the first hold.
+- Head colours are learned over a fixed window (the CLI: `--learn`, by recorded time), extended (live, up to 30 s) while any lane has under 6 separate heads: jacks merge into long runs that do not count. Stopping as soon as some counts are reached can end before the first hold.
+- Songs can start without holds or have none, so play never waits for the trail colour. Until it is learned, holds are tapped; meanwhile a side thread keeps feeding the learner every 8th frame and hands the trail colour to the detector (and the profile) once 3 holds have been seen.
 - If learning fails with the guessed scroll direction, retry the other way (`cli detect` does this).
-- Store learned colours in the profile. Re-learn when a song starts and the stored colours match under 50% of moving blobs (skin change).
+- Store learned colours in the profile. When the profile matches (display, and receptors within 2% of the stream height), the stored colours are used and only the background is re-learned. Re-learn when a song starts and the stored colours match under 50% of moving blobs (skin change); until the app does this, the CLI takes `--relearn`.
 
 ### Manual nudge
 Setup > Calibrate shows the snapshot with receptor boxes and strips. Users can drag a box (whole layout moves together) and change pitch and strip width. Saved to the profile as an offset on top of auto-detection.

@@ -96,6 +96,9 @@ enum Cmd {
         /// Seconds of song used to learn colours before playing
         #[arg(long, default_value_t = 8.0)]
         learn: f32,
+        /// Ignore the colours saved in the profile and learn them again (skin change)
+        #[arg(long)]
+        relearn: bool,
     },
     /// Show which window the focus guard thinks is active
     Focus {
@@ -169,6 +172,7 @@ fn main() -> ExitCode {
             seconds,
             offset_ms,
             learn,
+            relearn,
         } => open_screen().and_then(|mut src| {
             run::run(
                 &mut src,
@@ -177,6 +181,7 @@ fn main() -> ExitCode {
                     seconds,
                     offset_ms,
                     learn_s: learn,
+                    relearn,
                 },
             )
         }),

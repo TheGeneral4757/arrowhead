@@ -70,7 +70,7 @@ pub fn run(o: Opts) -> Res {
     let upto = lo.clamp(2, n);
     let cfg = DetectConfig::default();
 
-    let snaps = spread(&mut reader, 9, upto)?;
+    let snaps = spread(&mut reader, 25, upto)?;
     let views: Vec<FrameView> = snaps.iter().map(|f| f.view()).collect();
     let groups = find_groups(&find_blobs(&views, h.height), h.height);
     for (i, g) in groups.iter().enumerate() {

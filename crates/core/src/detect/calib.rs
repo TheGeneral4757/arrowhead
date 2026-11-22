@@ -38,34 +38,83 @@ fn median_u8(v: &mut [u8]) -> u8 {
 }
 
 /// Per-pixel median luma of `r` (stream coords, inside every frame's region), downscaled by `ds`.
-fn median_luma(frames: &[FrameView], r: Rect, ds: u32) -> (Vec<u8>, usize, usize) {
+/// With `still`, a pixel gets the middle of its densest grey cluster (within 24 luma) if that
+/// holds at least a fifth of the frames, else the median: idle
+/// receptors are grey and do not change, while notes are coloured and their grey outlines move.
+/// In dense charts a receptor uncovered in a few frames still shows; a median gives the notes.
+fn median_luma(frames: &[FrameView], r: Rect, ds: u32, still: bool) -> (Vec<u8>, usize, usize) {
     let (w, h) = ((r.w / ds) as usize, (r.h / ds) as usize);
     let mut out = vec![0u8; w * h];
     let mut tmp = vec![0u8; frames.len()];
+    let mut grey = Vec::with_capacity(frames.len());
     for y in 0..h {
         for x in 0..w {
+            grey.clear();
             for (k, f) in frames.iter().enumerate() {
-                let mut s = 0u32;
+                let mut s = [0u32; 3];
                 for j in 0..ds {
                     let sy = r.y as usize + y * ds as usize + j as usize - f.region.y as usize;
                     for i in 0..ds {
                         let sx = r.x as usize + x * ds as usize + i as usize - f.region.x as usize;
-                        s += luma(&f.data[sy * f.stride + sx * 4..]) as u32;
+                        let p = &f.data[sy * f.stride + sx * 4..];
+                        for c in 0..3 {
+                            s[c] += p[c] as u32;
+                        }
                     }
                 }
-                tmp[k] = (s / (ds * ds)) as u8;
+                let n = ds * ds;
+                let px = [(s[0] / n) as u8, (s[1] / n) as u8, (s[2] / n) as u8];
+                tmp[k] = luma(&px) as u8;
+                if still && Opp::from_rgb(px[2], px[1], px[0]).chroma() < GREY_CHROMA {
+                    grey.push(tmp[k]);
+                }
             }
-            out[y * w + x] = median_u8(&mut tmp);
+            // Densest cluster of grey samples (within 24 luma): two pointers over the sorted values.
+            grey.sort_unstable();
+            let (mut best, mut lo) = ((0, 0), 0);
+            for hi in 0..grey.len() {
+                while grey[hi] - grey[lo] > 24 {
+                    lo += 1;
+                }
+                if hi + 1 - lo > best.1 - best.0 {
+                    best = (lo, hi + 1);
+                }
+            }
+            // A grey value seen in under a fifth of the frames is something passing (a trail over
+            // a coloured background), not a still receptor.
+            out[y * w + x] = if (best.1 - best.0) * 5 < frames.len() {
+                median_u8(&mut tmp)
+            } else {
+                grey[(best.0 + best.1) / 2]
+            };
         }
     }
     (out, w, h)
 }
 
+/// Dilate (`any` = true: some pixel in the box is set) or erode (all are set), box radius `r`.
+fn box_any(src: &[bool], w: usize, h: usize, r: usize, any: bool) -> Vec<bool> {
+    let mut out = vec![false; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let ys = y.saturating_sub(r)..(y + r + 1).min(h);
+            let mut hit = ys.clone().flat_map(|yy| {
+                (x.saturating_sub(r)..(x + r + 1).min(w)).map(move |xx| src[yy * w + xx])
+            });
+            out[y * w + x] = if any { hit.any(|v| v) } else { hit.all(|v| v) };
+        }
+    }
+    out
+}
+
+/// Chroma (|C1| + |C2|) under which a pixel counts as grey for `median_luma(still)`.
+const GREY_CHROMA: i32 = 40;
+
 /// Blobs that contrast with their surround in the median of `frames` (moving things drop out).
 pub fn find_blobs(frames: &[FrameView], stream_h: u32) -> Vec<Blob> {
     let region = frames[0].region;
     let ds = 2u32;
-    let (l, w, h) = median_luma(frames, region, ds);
+    let (l, w, h) = median_luma(frames, region, ds, true);
     // Integral image for the local mean.
     let mut ii = vec![0u64; (w + 1) * (h + 1)];
     for y in 0..h {
@@ -94,6 +143,18 @@ pub fn find_blobs(frames: &[FrameView], stream_h: u32) -> Vec<Blob> {
             } else {
                 0
             };
+        }
+    }
+    // Close 2 px gaps per class: outlines of passing notes can win a few pixels of a receptor
+    // and split it.
+    for m in [1u8, 2] {
+        let on: Vec<bool> = mask.iter().map(|&v| v == m).collect();
+        let grown = box_any(&on, w, h, 2, true);
+        let closed = box_any(&grown, w, h, 2, false);
+        for (v, &c) in mask.iter_mut().zip(&closed) {
+            if *v == 0 && c {
+                *v = m;
+            }
         }
     }
     let hh = (stream_h / ds) as f32;
@@ -241,8 +302,8 @@ pub fn guess_scroll(g: &Group, stream_h: u32) -> Scroll {
 }
 
 /// Full-resolution median luma of `r`, row-major `r.w` wide.
-fn median_box(frames: &[FrameView], r: Rect) -> Vec<u8> {
-    median_luma(frames, r, 1).0
+fn median_box(frames: &[FrameView], r: Rect, still: bool) -> Vec<u8> {
+    median_luma(frames, r, 1, still).0
 }
 
 /// Refine centres at full resolution (spec 03 step 5). x is the centroid of the receptor's
@@ -270,7 +331,7 @@ pub fn layout_for(
             receptors[lane] = [b.cx, b.cy];
             continue;
         };
-        let l = median_box(frames, r);
+        let l = median_box(frames, r, true);
         let mut sorted = l.clone();
         sorted.sort_unstable();
         let lo = sorted[sorted.len() / 10] as i32;
@@ -374,7 +435,7 @@ impl ColourLearner {
     pub fn new(layout: Layout, cfg: DetectConfig, bg_frames: &[FrameView]) -> Self {
         let strips = [0, 1, 2, 3].map(|l| layout.strip(l, &cfg));
         let bg = strips.map(|s| match s.intersect(&bg_frames[0].region) {
-            Some(r) if r == s => median_box(bg_frames, s),
+            Some(r) if r == s => median_box(bg_frames, s, false),
             _ => vec![0; (s.w * s.h) as usize],
         });
         Self {
@@ -649,7 +710,9 @@ impl Presence {
             )
         });
         let templates = boxes.map(|b| match b.intersect(&frames[0].region) {
-            Some(i) if i == b => zero_mean(median_box(frames, b).into_iter().map(|v| v as f32)),
+            Some(i) if i == b => {
+                zero_mean(median_box(frames, b, true).into_iter().map(|v| v as f32))
+            }
             _ => Vec::new(),
         });
         Self {
