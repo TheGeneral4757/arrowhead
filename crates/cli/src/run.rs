@@ -3,9 +3,7 @@
 
 use std::sync::Arc;
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
 
-use arrowhead_core::config::{Config, config_dir, load_toml};
 use arrowhead_core::event::{EngineEvent, Level};
 use arrowhead_core::frame::FrameSource;
 use arrowhead_core::input::NullSink;
@@ -87,7 +85,9 @@ pub fn run(src: &mut dyn FrameSource, o: Opts) -> Res {
 /// `focus`: print the active window class as the KWin probe sees it (checks P5).
 #[cfg(target_os = "linux")]
 pub fn focus(seconds: f32) -> Res {
+    use arrowhead_core::config::{Config, config_dir, load_toml};
     use arrowhead_core::input::FocusProbe;
+    use std::time::{Duration, Instant};
     let cfg: Config = config_dir()
         .map(|d| load_toml(&d.join("config.toml")))
         .transpose()?
