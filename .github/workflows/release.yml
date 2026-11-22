@@ -139,10 +139,13 @@ jobs:
 
       # tauri build runs the UI build first (beforeBuildCommand) and the MSI bundler (WiX, which
       # tauri downloads); the zip is ours.
-      - name: Build app (MSI) and cli
+      # The overlay goes into the MSI as a sidecar (tauri.windows.conf.json), installed next to
+      # arrowhead.exe, where the app looks for it.
+      - name: Build app (MSI), cli and overlay
         run: |
+          cargo build --release -p arrowhead-cli -p arrowhead-overlay
+          cp target/release/arrowhead-overlay.exe target/release/arrowhead-overlay-x86_64-pc-windows-msvc.exe
           npm --prefix ui run tauri build -- --bundles msi
-          cargo build --release -p arrowhead-cli
 
       - name: Package
         run: |
@@ -152,7 +155,7 @@ jobs:
           cp target/release/bundle/msi/*.msi "dist/$msi"
           name="arrowhead-${VERSION}-windows-x86_64"
           mkdir -p "dist/$name"
-          cp target/release/arrowhead.exe target/release/arrowhead-cli.exe LICENSE README.md "dist/$name/"
+          cp target/release/arrowhead.exe target/release/arrowhead-cli.exe target/release/arrowhead-overlay.exe LICENSE README.md "dist/$name/"
           (cd dist && powershell -NoProfile -Command "Compress-Archive -Path '$name' -DestinationPath '$zip'")
           echo "MSI=$msi" >> "$GITHUB_ENV"
           echo "ZIP=$zip" >> "$GITHUB_ENV"
