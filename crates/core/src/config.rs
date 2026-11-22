@@ -325,6 +325,16 @@ pub struct HudRegions {
     pub score_opponent: Option<[i32; 4]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<[i32; 4]>,
+    /// Stats panel (7 rows, Accuracy first) and judgment counts (5 rows).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stats: Option<[i32; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counts: Option<[i32; 4]>,
+    /// Scores by screen side; the engine maps them to self/opponent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score_left: Option<[i32; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score_right: Option<[i32; 4]>,
 }
 
 /// Calibration for one display setup. `[colours]` and `[detect]` arrive in M3;

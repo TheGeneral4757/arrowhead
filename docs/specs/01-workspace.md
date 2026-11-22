@@ -47,7 +47,7 @@ ashpd, pipewire, windows, windows-capture, evdev, ocrs/rten, sctk, tauri were ch
 | tracing, tracing-subscriber, tracing-appender | 0.1 / 0.3 / 0.2 | all | Logs, rotating files |
 | rand, rand_chacha | 0.9 / 0.9 | core | Seeded RNG for the player model (deterministic tests) |
 | zstd | 0.13 | capture | Clip compression |
-| ocrs, rten | 0.14 / 0.28 | core (feature `ocr`) | Song titles, glyph atlas bootstrap. Off hot path |
+| ocrs, rten | 0.14 / 0.28 | core (feature `ocr`) | Song titles only (deferred to a later release); the HUD glyph atlas does not use OCR ([03](03-detection.md#hud-reading-corehud-hud-thread-10-20-hz)). Off hot path |
 | dirs | 6 | core | Config/data dirs |
 | smithay-client-toolkit, wayland-protocols-wlr | 0.21 / 0.3 | overlay | Layer-shell |
 | tiny-skia | 0.11 | overlay | Software drawing |

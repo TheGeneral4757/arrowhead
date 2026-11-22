@@ -12,6 +12,7 @@ use arrowhead_core::time::Nanos;
 use clap::{Parser, Subcommand};
 
 mod detect;
+mod hud;
 mod latency;
 mod run;
 
@@ -101,6 +102,21 @@ enum Cmd {
         /// Ignore the colours saved in the profile and learn them again (skin change)
         #[arg(long)]
         relearn: bool,
+    },
+    /// Teach the HUD glyph atlas from known text on screenshots, then find and read the HUD
+    Hud {
+        /// Screenshots (PNG) to read
+        files: Vec<PathBuf>,
+        /// `file.png:kind=values`, see `hud.rs`; file names are looked up next to the first image
+        #[arg(long, allow_hyphen_values = true)]
+        teach: Vec<String>,
+        /// Atlas file to load first (and write with --save)
+        #[arg(long)]
+        atlas: Option<PathBuf>,
+        #[arg(long)]
+        save: bool,
+        #[arg(long, default_value_t = 0.25)]
+        max_sad: f32,
     },
     /// Show which window the focus guard thinks is active
     Focus {
@@ -193,6 +209,20 @@ fn main() -> ExitCode {
                 },
             )
         }),
+        Cmd::Hud {
+            files,
+            teach,
+            atlas,
+            save,
+            max_sad,
+        } => {
+            let dir = files
+                .first()
+                .and_then(|f| f.parent())
+                .unwrap_or(Path::new("."))
+                .to_path_buf();
+            hud::run(&files, &teach, &dir, atlas.as_deref(), save, max_sad)
+        }
         Cmd::Focus { seconds } => run::focus(seconds),
         Cmd::Bench { presses } => run::bench(presses),
         Cmd::Latency { trials } => {
