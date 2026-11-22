@@ -28,6 +28,18 @@ arrowhead: screen-reading Funky Friday (Roblox) autoplayer, 4-key ("4K") mode on
 - Conventional commits, one PR per milestone. Straight quotes and plain hyphens.
 - Do not run the app or send keys against the real game without the user asking: it acts on their Roblox account.
 
+## Releases and release notes
+release-please opens the release PR; merging it tags `vX.Y.Z` and runs `release.yml`. Full flow: `docs/specs/10-release.md`.
+
+| Part | Rule |
+|---|---|
+| Changelog | Only feat, fix and perf show (`release-please-config.json`). Write user-facing commit subjects. |
+| Highlights | Before merging a release PR, Claude writes 1-3 plain sentences under the version heading in both the PR's notes and `CHANGELOG.md`: what changed for the player. |
+| Release body | Version heading, highlights, `### Install` (from `.github/release-install.md`, added by CI), `### Features` / `### Bug Fixes`, then the footer "Made by James Thiessen with Claude Code (Claude Opus 5.5)" linking `#ai-use`. CI adds Install and footer; do not add them by hand. |
+| Owner and AI | James Thiessen is the maker (LICENSE, PKGBUILD maintainer, README). Keep the AI use note in README, PKGBUILD and every release. |
+| AUR | `arrowhead-bin`: CI commits the PKGBUILD bump to main and publishes once `AUR_SSH_KEY` and `AUR_EMAIL` secrets exist (not yet: AUR registration was closed on 2026-11-22). |
+| README images | `assets/screenshots/{live,setup,settings}.png`, 1600 px wide. Replace with the same names. |
+
 ## Commands
 | Task | Command |
 |---|---|
