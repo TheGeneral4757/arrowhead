@@ -140,6 +140,7 @@ dependencies = [
  "arrowhead-core",
  "arrowhead-input",
  "clap",
+ "png",
  "serde_json",
 ]
 

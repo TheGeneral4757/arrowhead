@@ -28,6 +28,11 @@ pipewire = "0.10"
 tokio = { version = "1", features = ["rt", "time"] }
 tempfile = "3"
 clap = { version = "4.6", features = ["derive"] }
+png = "0.18"
+
+# Detection and the synthetic frame tests are pixel loops; debug builds are too slow for them.
+[profile.dev.package.arrowhead-core]
+opt-level = 3
 
 [profile.release]
 lto = "thin"

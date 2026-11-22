@@ -330,6 +330,10 @@ pub struct Profile {
     pub nudge: Nudge,
     pub latency: Latency,
     pub hud: HudRegions,
+    /// Learned head and trail colours; absent until calibration ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub colours: Option<crate::detect::Colours>,
+    pub detect: crate::detect::DetectConfig,
 }
 
 impl Default for Profile {
@@ -347,6 +351,8 @@ impl Default for Profile {
             nudge: Nudge::default(),
             latency: Latency::default(),
             hud: HudRegions::default(),
+            colours: None,
+            detect: Default::default(),
         }
     }
 }
@@ -503,7 +509,7 @@ mod tests {
         let p = dir.path().join("profile.toml");
         fs::write(
             &p,
-            "monitor = \"DP-1\" # my screen\nfuture = 3\n\n[colours]\nheads = [1, 2]\n",
+            "monitor = \"DP-1\" # my screen\nfuture = 3\n\n[future_table]\nheads = [1, 2]\n",
         )
         .unwrap();
         let mut prof: Profile = load_toml(&p).unwrap();

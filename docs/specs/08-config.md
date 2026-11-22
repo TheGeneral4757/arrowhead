@@ -90,11 +90,12 @@ receptors = [[1702.4, 1288.1], [1846.0, 1288.3], [1989.7, 1288.0], [2133.2, 1288
 radius_px = 61.5
 nudge = { dx = 0, dy = 0, dpitch = 0.0, dwidth = 0.0 }
 
-[colours]                    # learned, opponent space (C1, C2, Y)
+[colours]                    # learned, opponent space (C1, C2, Y); absent until calibrated
 heads = [[...], [...], [...], [...]]
 head_tol = [..]
-trail = [..]
+trail = [..]                 # absent if not learned
 trail_tol = ..
+head_len = [..]              # run length of one head per lane, px
 
 [latency]
 capture_ms = 6.1

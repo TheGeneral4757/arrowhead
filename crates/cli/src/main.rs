@@ -11,6 +11,8 @@ use arrowhead_core::runtime::platform::monotonic_ns;
 use arrowhead_core::time::Nanos;
 use clap::{Parser, Subcommand};
 
+mod detect;
+
 #[derive(Parser)]
 #[command(name = "arrowhead-cli", version = arrowhead_core::VERSION, about = "arrowhead headless tools")]
 struct Cli {
@@ -62,8 +64,21 @@ enum Cmd {
     },
     /// Print environment and config locations
     Diag,
-    /// Print layout, side, scroll and note observations (M3)
-    Detect,
+    /// Calibrate on a clip, then print layout, side, scroll and per-frame note observations
+    Detect {
+        clip: PathBuf,
+        /// Seconds at the start of the clip used to find receptors and learn colours
+        #[arg(long, default_value_t = 8.0)]
+        learn: f32,
+        /// Write an annotated PNG every `--every` frames into this directory
+        #[arg(long)]
+        debug_png: Option<PathBuf>,
+        #[arg(long, default_value_t = 30)]
+        every: usize,
+        /// Summary only, no per-frame lines
+        #[arg(short, long)]
+        quiet: bool,
+    },
     /// Play the game (M4)
     Run,
     /// Benchmark the scan path (M3)
@@ -102,7 +117,28 @@ fn main() -> ExitCode {
             seconds,
         } => import(&video, &out, region, start, seconds),
         Cmd::Diag => diag(),
-        Cmd::Detect | Cmd::Run | Cmd::Bench => Err("not implemented yet".into()),
+        Cmd::Detect {
+            clip,
+            learn,
+            debug_png,
+            every,
+            quiet,
+        } => {
+            if let Some(d) = &debug_png
+                && let Err(e) = std::fs::create_dir_all(d)
+            {
+                eprintln!("error: {e}");
+                return ExitCode::FAILURE;
+            }
+            detect::run(detect::Opts {
+                clip: &clip,
+                learn_s: learn,
+                debug_png: debug_png.as_deref(),
+                every,
+                quiet,
+            })
+        }
+        Cmd::Run | Cmd::Bench => Err("not implemented yet".into()),
     };
     match res {
         Ok(()) => ExitCode::SUCCESS,

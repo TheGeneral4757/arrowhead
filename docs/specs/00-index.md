@@ -51,7 +51,7 @@ Names other specs rely on. Field lists are minimums.
 | `Rect` | `{ x: i32, y: i32, w: u32, h: u32 }`, physical pixels of the captured stream |
 | `FrameView<'a>` | `{ seq: u64, pts: Nanos, region: Rect, stride: usize, data: &'a [u8] }`, BGRx |
 | `LaneLayout` | `{ side, scroll, receptors: [Point; 4], radius: f32, pitch: f32, strips: [Rect; 4] }` |
-| `NoteObs` | `{ lane, y: f32, kind: Head | TrailStart | TrailEnd, frame_pts: Nanos }` |
+| `NoteObs` | `{ lane, y: f32, kind: Head | TrailStart | TrailEnd, pts: Nanos }` |
 | `Track` | `{ id: u32, lane, obs: SmallVec<NoteObs>, predicted_cross: Nanos, hold_end: Option<Nanos> }` |
 | `PressPlan` | `{ track_id, lane, press_at: Nanos, release_at: Nanos, committed: bool }` |
 | `KeyAction` | `{ lane, down: bool }` |
