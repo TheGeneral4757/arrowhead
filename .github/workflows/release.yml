@@ -61,7 +61,11 @@ jobs:
           mkdir -p "dist/$name"
           cp target/release/arrowhead target/release/arrowhead-cli target/release/arrowhead-overlay "dist/$name/"
           cp LICENSE README.md packaging/arrowhead.desktop "dist/$name/"
-          cp crates/app/icons/128x128.png "dist/$name/arrowhead.png"
+          mkdir "dist/$name/icons"
+          cp crates/app/icons/32x32.png "dist/$name/icons/32.png"
+          cp crates/app/icons/128x128.png "dist/$name/icons/128.png"
+          cp crates/app/icons/128x128@2x.png "dist/$name/icons/256.png"
+          cp crates/app/icons/icon.png "dist/$name/icons/512.png"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           echo "ASSET=$name.tar.gz" >> "$GITHUB_ENV"
 
@@ -91,6 +95,19 @@ jobs:
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
           gh release upload "$TAG" dist/"$ASSET" dist/"$ASSET".sig dist/latest.json dist/SHA256SUMS --clobber
 
+      # Release body: release-please notes (highlights + changes) with an Install block before the
+      # first "### " section and a footer. Runs after latest.json so the updater gets the plain notes.
+      - name: Add install block and footer
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          gh release view "$TAG" --json body -q .body > notes.md
+          grep -q '^### Install' notes.md && exit 0
+          sed -e "s/@VERSION@/$VERSION/g" -e "s/@TAG@/$TAG/g" .github/release-install.md > install.md
+          awk 'FNR==NR{ins=ins $0 "\n"; next} !done && /^### /{printf "%s\n", ins; done=1} {print} END{if(!done) printf "\n%s", ins}' install.md notes.md > body.md
+          printf '\n---\nMade by James Thiessen with Claude Code (Claude Opus 5.5). See the [AI use note](https://github.com/%s#ai-use).\n' "${{ github.repository }}" >> body.md
+          gh release edit "$TAG" --notes-file body.md
+
   # Windows (v0.2): tauri build with the MSI bundler, plus a portable zip.
 
   aur:
@@ -100,9 +117,9 @@ jobs:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
       VERSION: ${{ needs.linux.outputs.version }}
       GH_TOKEN: ${{ github.token }}
+      AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
     permissions:
       contents: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -116,14 +133,21 @@ jobs:
             -e "s#arrowhead-[0-9][^/]*-linux-x86_64.tar.gz#arrowhead-$VERSION-linux-x86_64.tar.gz#g" \
             -e "s#download/v[^/]*/#download/v$VERSION/#g" packaging/aur/.SRCINFO
           rm SHA256SUMS
-      - name: Open a PR
+      - name: Commit the bump to main
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          branch="aur-$VERSION"
-          git checkout -b "$branch"
+          git diff --quiet && exit 0
           git commit -am "chore(aur): arrowhead-bin $VERSION"
-          git push origin "$branch"
-          gh pr create --title "chore(aur): arrowhead-bin $VERSION" --body "Bumps pkgver and sha256sums for $TAG."
-      # Publishing to the AUR is off until an AUR_SSH_KEY secret exists (spec 10), e.g. with
-      # KSXGitHub/github-actions-deploy-aur pointed at packaging/aur/PKGBUILD.
+          git push origin HEAD:main
+      # Skipped until the AUR_SSH_KEY and AUR_EMAIL secrets exist (spec 10).
+      - name: Publish to the AUR
+        if: env.AUR_SSH_KEY != ''
+        uses: KSXGitHub/github-actions-deploy-aur@v4.2.0
+        with:
+          pkgname: arrowhead-bin
+          pkgbuild: packaging/aur/PKGBUILD
+          commit_username: James Thiessen
+          commit_email: ${{ secrets.AUR_EMAIL }}
+          ssh_private_key: ${{ secrets.AUR_SSH_KEY }}
+          commit_message: arrowhead-bin ${{ env.VERSION }}

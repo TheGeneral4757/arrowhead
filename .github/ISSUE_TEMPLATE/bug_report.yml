@@ -1,0 +1,55 @@
+name: Bug report
+description: Something broke or played wrong
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: arrowhead version
+      placeholder: "0.1.0 (arrowhead-cli --version)"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installed from
+      options: [AUR, Tarball, Built from source]
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distro
+      placeholder: Arch, CachyOS, Fedora 43...
+    validations:
+      required: true
+  - type: dropdown
+    id: desktop
+    attributes:
+      label: Desktop
+      options: [KDE Plasma 6, Hyprland, Other]
+    validations:
+      required: true
+  - type: input
+    id: sober
+    attributes:
+      label: Sober version
+      placeholder: flatpak info org.vinegarhq.Sober
+  - type: input
+    id: monitor
+    attributes:
+      label: Monitor resolution and refresh rate
+      placeholder: 2560x1440 165 Hz
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The app's log file or CLI output. Paste the relevant part.
+      render: text

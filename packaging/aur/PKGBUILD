@@ -1,4 +1,6 @@
-# Maintainer: TheGeneral4757
+# Maintainer: James Thiessen <https://github.com/TheGeneral4757>
+# arrowhead is written with AI (Claude Code, Claude Opus 5.5), directed and tested by its maintainer.
+# Automating input in Roblox breaks its Terms of Use: private servers only, at your own risk.
 pkgname=arrowhead-bin
 pkgver=0.1.0
 pkgrel=1
@@ -22,6 +24,8 @@ package() {
   # The app reads this and leaves updates to the package manager (spec 10).
   echo aur | install -Dm644 /dev/stdin "$pkgdir/usr/lib/arrowhead/packaged"
   install -Dm644 arrowhead.desktop "$pkgdir/usr/share/applications/arrowhead.desktop"
-  install -Dm644 arrowhead.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/arrowhead.png"
+  for s in 32 128 256 512; do
+    install -Dm644 "icons/${s}.png" "$pkgdir/usr/share/icons/hicolor/${s}x${s}/apps/arrowhead.png"
+  done
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
