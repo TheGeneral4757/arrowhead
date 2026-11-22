@@ -12,7 +12,7 @@ optdepends=('xdg-desktop-portal-kde: screen capture and hotkeys on KDE Plasma'
 provides=('arrowhead')
 conflicts=('arrowhead')
 source=("$url/releases/download/v$pkgver/arrowhead-$pkgver-linux-x86_64.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('377fb9084fde1bee77a58da8c120e583635f789e3ccf41e4fcd8f926341834b6')
 
 package() {
   cd "arrowhead-$pkgver-linux-x86_64"

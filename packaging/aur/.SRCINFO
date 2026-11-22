@@ -15,6 +15,6 @@ pkgbase = arrowhead-bin
 	provides = arrowhead
 	conflicts = arrowhead
 	source = https://github.com/TheGeneral4757/arrowhead/releases/download/v0.1.0/arrowhead-0.1.0-linux-x86_64.tar.gz
-	sha256sums = SKIP
+	sha256sums = 377fb9084fde1bee77a58da8c120e583635f789e3ccf41e4fcd8f926341834b6
 
 pkgname = arrowhead-bin
