@@ -8,7 +8,7 @@ milestone: M5
 
 ## Versioning
 - SemVer, one version for the whole workspace (`version.workspace = true`) and `ui/package.json`.
-- release-please (`.github/workflows/release-please.yml`, `release-type: rust`, extra-files for `ui/package.json` and `crates/app/tauri.conf.json`). Merging its PR creates the tag `vX.Y.Z` and the GitHub release notes.
+- release-please (`.github/workflows/release-please.yml`, `release-type: simple`, since the root is a virtual workspace the rust type cannot read; extra-files bump `workspace.package.version` in `Cargo.toml`, `ui/package.json` and `crates/app/tauri.conf.json`). Merging its PR creates the tag `vX.Y.Z` and the GitHub release notes.
 
 ## Release build (`.github/workflows/release.yml`, on tag)
 | Runner | Build | Assets |
