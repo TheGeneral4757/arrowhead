@@ -104,23 +104,53 @@ Receptor presence check while `Armed`/`Playing`: every 10th frame, compare the r
 
 ## HUD reading (`core::hud`, hud thread, 10-20 Hz)
 
-Which elements exist, where they are and how they look is unknown until M0. Each element's region is found by searching the whole frame (ocrs, off the hot path) for its text pattern, then stored in the profile. Missing elements disable the features that need them; nothing else breaks.
+No OCR. Every element is found and read with a per-profile glyph atlas that is taught from text whose content is known. (The earlier plan used ocrs; it needs model files, which means bundling or a network fetch, and decisions.md keeps OCR for song titles only. Song title reading is deferred.) The module is pure: it takes a `FrameView` and returns typed reads, the hud thread is the integrator's.
 
-| Element | Expected text pattern (verify in M0) | Method | Used for |
-|---|---|---|---|
-| ms readout | signed number + "ms", under the judgment word | Glyph templates | Timing readback ([04](04-timing.md#readback)) |
-| Judgment word | Sick! / Good! / Ok / Bad / Miss, popup in our playfield (the opponent's shows near theirs) | Template per word | Readback, history |
-| Stats panel | "Accuracy: n.nn%", Highest Combo, Combo, Hits, Misses, "Mean MS: n.nn ms", KPS | Glyph templates | Controller ([06](06-humanizer.md)), history |
-| Judgment counts | "Sick: n" ... "Miss: n" | Glyph templates | History, readback check |
-| Scores (ours, opponent's) | bare signed integer next to each avatar, no label | Glyph templates | Match mode |
-| Song title + difficulty | "Pack - Song (Difficulty)" + time left | ocrs, once per song | History |
-| Results | "Stats from last song" panel | Template | `Results` state, history |
+| Element | Text (verified on the user's game, G3/G6/G11) | Face | Region found by | Read as |
+|---|---|---|---|---|
+| Stats panel | 7 left-aligned rows: `Accuracy: 0.00%`, Highest Combo, Combo, Hits, Misses, `Mean MS: 0.00 ms`, KPS | Stats | stack of 7 rows | `StatsRead` (every field `Option`) |
+| Judgment counts | 5 rows: Sick, Good, Ok, Bad, Miss (each its own colour) | Stats | stack of 5 rows | `Counts` |
+| ms readout | `-143.26 ms`, yellow, under the judgment popup (G4: late is negative). Each player's is near their own playfield; ours only after we hit a note | Ms | reading candidate lines inside our playfield | `f32` as shown |
+| Scores | bare signed integer next to each avatar, bottom corners | Score | reading candidate lines | `[left, right]`; the engine maps sides to self/opponent |
+| Results panel | "Stats from Last Song": Sick..Miss, Total Notes; Accuracy, Mean MS, Combo, Highest Combo | Results | stacks of 6 and 4 rows, labels verified | `ResultsRead`; counts must add up to Total Notes |
+| Judgment popup word | big decorative font, jittery, "MISS MISS" | none | not read | deferred; the counts changing tell which judgment happened |
+| Song title, difficulty, time | small text top centre | none | not read | deferred (needs OCR) |
 
-### Glyph templates
-- Atlas per profile (font size depends on resolution): digits 0-9, `.`, `-`, `%`, `:`, plus the words Sick, Good, Ok, Bad, Miss.
-- Bootstrap: on the first frames where a HUD region is stable for 300 ms, run ocrs on it (off the hot path), segment by column projection, label glyphs from the OCR text, keep the cleanest example per glyph. The user can confirm the atlas in Setup.
-- Reading: threshold by the white text with dark outline, column projection to split glyphs, nearest template by SAD on a normalised 12 x 16 cell. Reject the read if any glyph's best SAD is above `glyph_max_sad` or the parse fails the expected pattern (regex per element).
-- Regions for each element are found once per profile by searching for the pattern text with ocrs, then fixed.
+A face is a font style with its own glyph shapes: the stats panel and the counts share one; the ms readout, the scores and the results panel each differ.
+
+### Segmentation and matching
+- Brightness is luma, not max channel (a pure red stage glow must stay below the coral Miss text). Text is bright with a dark outline, in any colour.
+- A line is a group of bright connected components on one row (gaps up to one text height). Lines are found over the whole frame once per profile (`find_lines`, threshold luma 105 for the game, 90 for the results panel).
+- Inside a region: loose threshold (0.45 of the region's 98th percentile) finds column groups, then each group is thresholded at 0.78 of its own plateau (75th percentile of its ink), so a dim magenta label and a white value on one row both survive and touching glyphs split. Column projection gives cells. A cell much wider than a glyph is cut at the emptiest column near equal divisions.
+- Every cell is the glyph bounding box resampled (area average) to a 12 x 16 bitmap over the row's common vertical range (median top and bottom of the tall cells), so `.` stays at the bottom and `-` in the middle. Distance = mean absolute difference (0..1) + 0.4 x aspect difference. Up to 6 examples per (face, char) are kept.
+- Reject: any glyph above `glyph_max_sad` (profile `[detect]`, default 0.25), a near tie between two different characters (3 against 5), or a failed parse. Parsing is per element (`parse_ms`: signed `n.nn` then `ms`; `parse_pct`: `n.nn%`, 0-100; unsigned and signed integers; the judgment words).
+- A cell that matches nothing may hold two touching glyphs (a `.` against a digit): the reader tries every cut and accepts the best pair that both match.
+- Row labels (`Accuracy:`, `Sick:`...) are matched as whole-word bitmaps (48 x 16). The label ends at the Nth wide gap (N = words in the label); the value is what follows. A row that does not match its label is not read, so an occluded row (a hold trail across the counts) gives `None` for that row only.
+- Rows of a stack are found by row projection; columns with an unbroken ink run longer than one row pitch (a hold trail) are ignored, and if rows still merge they are laid out from the stack's even pitch.
+
+### Finding the regions (no OCR)
+1. Stats and counts: text lines that form a stack of 7 (5) left-aligned rows of similar height and regular pitch. Once labels are taught the first rows are verified against them.
+2. ms readout: of the remaining lines (and unions of neighbouring pieces, since the ms font is wide-spaced), the first one centred inside our playfield (`HudReader::set_playfield`: one receptor pitch beyond the outer lanes) that reads as a valid `ms` string with the Ms face. The opponent's readout, near their playfield, is never taken for ours. Without a playfield no ms readout is located. Until we have hit a note none is on screen, so locating the ms readout is retried while playing until it is found.
+3. Scores: remaining lines that read as integers with the Score face; the two tallest, split left and right by the frame middle. An avatar touching the number is dropped by its poor match, and the stored rect hugs the digits.
+4. Results: a stack of 6 and a stack of 4 whose labels match with the Results face.
+Regions go to the profile's `[hud]` ([08](08-config.md)). Missing elements disable what needs them; nothing else breaks.
+
+### Teaching the atlas (bootstrap)
+Glyph shapes cannot be known before the game has been seen, so the atlas is taught from text the app knows:
+1. Song start (session `Armed`, before the first hit): every counter reads zero. `bootstrap_song_start` teaches `Accuracy: 0.00%`, the zeros, `Mean MS: 0.00 ms`, and the five count rows from that fact alone. This gives `0 . % m s` and all row labels, no OCR.
+2. Digits 1-9: `teach_stack(layout, values)` with the value the counter must have. The runner calls it as Combo, Hits and the counts tick up (`previous + 1`), so the atlas fills during the first notes. Unlabelled cells never enter the atlas.
+3. Setup shows the stats and counts rows and the ms and score lines with their reads and lets the user type the real value to correct or add a glyph (`teach_stack`, `teach_lines`). `teach_lines` takes an optional search rect, because the HUD has sprites that look like text.
+4. The ms font differs from the stats font (the stats glyphs read it at distance 0.34-0.95, far above 0.25), so it needs its own teaching. Live, without typing: on the frame where the stats panel's Hits first reads 1, Mean MS is that hit's ms, so our readout shows the same text (G14, unverified). `teach_ms_first_hit(frame, mean_ms)` teaches it inside our playfield and keeps the glyphs only if the readout then reads back as that value; a readout that contradicts a known glyph fails that read (the atlas rejects ties), so a wrong frame never adds glyphs. Each song's first hit adds its digits; values that use only known digits read from then on. The score face is taught in Setup or with `cli hud`. Until a face is taught, its elements read `None`.
+5. `cli hud <png...> --teach 'file.png:kind=values'` runs this on screenshots (kinds: `stats`, `counts`, `rstats`, `rcounts`, `ms`, `score`) and prints regions and reads. The atlas can be saved with `--atlas f.bin --save`.
+`glyphs/<profile>.bin`: magic `AHGL`, version 1, then glyphs (face, char, aspect, 192 bytes) and words (face, name, cell count, aspect, 768 bytes); written atomically. A missing or unreadable file is an empty atlas.
+
+> [!note] Results on the user's 2560x1440 screenshots (v0.2)
+> Taught on game2-5 (stats, counts, ms, scores) and read on the rest: held-out game6 reads misses 652, scores -19543 / 63082, and the opponent's ms -141.65 when read on their side; game1 reads 15 misses, no ms (none on screen), scores -395 / 0. Locate is about 35 ms in release (once per profile), a read about 1 ms.
+> - A hold trail crossing the counts (game6) makes the Sick and Good rows unreadable at times; those rows are `None`, the others still read.
+> - Results panel: counts, total, combos and mean ms read exactly on the taught screens. On a held-out screen after teaching from two others, counts and Total Notes were right, `Good`/`Bad` rows were rejected, and Accuracy misread `84.93%` as `84.95%`. Two teaching frames are too few for the results face; the live app teaches digits for a whole song. Do not trust results Accuracy until the face has seen many examples.
+> - The final score on the results panel is not read yet.
+> - Every screenshot has 0 hits on our side, so the only ms readout in them is the opponent's (under the small playfield on the right). With our playfield set it is correctly not read (`cli hud --playfield x0,x1`, and the `~/ah-clips` test). Our own readout has not been seen yet.
+> - Our score is the bottom-left one (negative from misses while the opponent's grows); the reader still reports scores as left/right and nothing uses them yet.
 
 ## Performance budget
 Per frame on the scan thread at 240 Hz (4.2 ms period): classify + profile + runs for 4 strips of 50 x 900 px = 180k pixels. Target `< 0.6 ms` p99 scalar on the dev machine. If not met: row-skip classification (classify every 2nd row, refine only near runs) before any SIMD.
@@ -128,7 +158,7 @@ Per frame on the scan thread at 240 Hz (4.2 ms period): classify + profile + run
 Measured (M3, dev machine, release, `cli detect` on a 12 s clip of the user's game): strips are 78 x ~1100 px x 4 = 343k pixels at 2560x1440, p50 0.94 ms, p99 1.12 ms. That is inside the 6 ms period at 165 Hz, so row-skip is not done yet; do it before targeting 240 Hz.
 
 ## Configuration (profile `[detect]`)
-`strip_width_frac = 0.35`, `approach_len_frac = 0.70`, `head_fill = 0.4`, `trail_fill = 0.4`, `head_tol_min/max = 12/60`, `trail_tol_min/max = 12/40`, `bg_tol = 18`, `learn_chroma = 40`, `receptor_ncc_min = 0.6`, `glyph_max_sad` (HUD, later).
+`strip_width_frac = 0.35`, `approach_len_frac = 0.70`, `head_fill = 0.4`, `trail_fill = 0.4`, `head_tol_min/max = 12/60`, `trail_tol_min/max = 12/40`, `bg_tol = 18`, `learn_chroma = 40`, `receptor_ncc_min = 0.6`, `glyph_max_sad = 0.25` (HUD, mean absolute difference per glyph cell).
 
 ## Acceptance (M3)
 - `arrowhead-cli detect <clip>` prints layout, side, scroll and a per-frame list of observations; an annotated PNG per N frames with `--debug-png`.

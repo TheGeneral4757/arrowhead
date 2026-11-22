@@ -6,6 +6,7 @@ pub mod detect;
 pub mod engine;
 pub mod event;
 pub mod frame;
+pub mod hud;
 pub mod input;
 pub mod plan;
 pub mod runtime;

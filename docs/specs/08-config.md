@@ -20,7 +20,7 @@ milestone: M2-M5
 | `screencast_token` | data | Portal restore token |
 | `history.jsonl` | data | One line per song |
 | `sessions/<date>-<n>.jsonl` | data | Per-note log for one song (optional, `log.per_note = true`) |
-| `glyphs/<profile>.bin` | data | Glyph atlas |
+| `glyphs/<profile>.bin` | data | Glyph atlas (binary: magic `AHGL`, version 1; [03](03-detection.md#teaching-the-atlas-bootstrap)) |
 | `logs/arrowhead.<date>.log` | data | tracing, daily rotation, keep 7 |
 
 All writes are atomic (write `*.tmp`, fsync, rename). Unknown keys are kept on save (`toml_edit`), so hand edits survive.
@@ -105,8 +105,12 @@ input_ms = 4.8
 game_bias_ms = 0.0
 
 [hud]                        # regions found by search; absent = not readable
+stats = [x, y, w, h]         # 7-row stats panel (Accuracy first)
+counts = [x, y, w, h]        # 5-row judgment counts
 ms_readout = [x, y, w, h]
-accuracy = [x, y, w, h]
+score_left = [x, y, w, h]    # by screen side; the engine maps to self / opponent
+score_right = [x, y, w, h]
+accuracy = [x, y, w, h]      # unused: accuracy is the stats panel's first row
 score_self = [x, y, w, h]
 score_opponent = [x, y, w, h]
 title = [x, y, w, h]
