@@ -12,12 +12,12 @@ Everything that can run without a screen or keyboard runs in CI. The engine is d
 | Layer | Where | What |
 |---|---|---|
 | Unit | each crate | Classifier, run splitting, Theil-Sen, tracker association, scheduler invariants, glyph reader, config round-trip |
-| Synthetic end-to-end | `core/tests/` | Chart -> rendered frames -> engine with `VirtualClock` + `RecordingSink` -> compare with ground truth |
+| Synthetic end-to-end | `core/src/detect/synth_tests.rs` (unit tests, so they see the `testkit` module without a feature flag) | Chart -> rendered frames -> engine with `VirtualClock` + `RecordingSink` -> compare with ground truth |
 | Clip regression | `tests/clips/` (LFS) | Recorded game footage -> detector + planner -> compare with labels |
 | Model statistics | `core/tests/style_*.rs` | [06](06-humanizer.md#statistical-tests-09) |
 | Manual | checklist below | Real game, real desktop |
 
-## Synthetic frame generator (`core::testkit`, feature `testkit`)
+## Synthetic frame generator (`core::testkit`, feature `testkit`, always on in core's own tests)
 Inputs: a chart (list of `{lane, time_ms, hold_ms}`), a `Scene`:
 
 | Scene field | Range covered by tests |
@@ -35,12 +35,12 @@ Inputs: a chart (list of `{lane, time_ms, hold_ms}`), a `Scene`:
 | pts jitter | 0-1.5 ms |
 | dropped frames | 0-5% |
 
-The generator also writes the ground truth (crossing time per note, hold end). Shapes and colours are random on purpose: nothing about the real skin may be baked into detection ([03](03-detection.md)).
+The generator also gives the ground truth (crossing time per note, hold end). Notes vanish at their crossing (hit), as they do in the game. Colours keep a minimum distance from each other and from the background (70 in the opponent-space L1 metric for heads, 40 for a coloured trail), and backgrounds stay at luma <= 60. The core crate builds with `opt-level = 3` in dev and test profiles so the 10k-note suite runs in about a minute. Shapes and colours are random on purpose: nothing about the real skin may be baked into detection ([03](03-detection.md)).
 
 Charts: generated patterns (singles, streams up to 20 nps, jacks down to 50 ms, 2-4 note chords, holds 100 ms-4 s, holds with taps in other lanes) and a few long mixed charts.
 
 ## Clip regression
-- Clips recorded in M0 and later with `arrowhead-cli record`, region only, zstd, stored as `tests/clips/<name>.ahclip` in LFS. Keep each under 50 MB.
+- Clips recorded in M0 and later with `arrowhead-cli record`, region only, zstd, stored as `tests/clips/<name>.ahclip` in LFS. Keep each under 50 MB. Not committed yet: the repo is public and the clips show the user's game, so adding them needs the user's OK (M3).
 - Labels `<name>.labels.json`: ground truth from (a) a careful manual pass with `arrowhead-cli label` (step through frames, mark crossings) or (b) Max runs with readback, where readback ms gives the true error.
 - Test: detection finds every labelled note in at least 3 frames before crossing; planned crossing within +/- 4 ms of label (frame-rate limited).
 

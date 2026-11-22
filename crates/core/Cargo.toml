@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 license-file.workspace = true
 
+[features]
+# Synthetic frame generator for other crates' tests and the CLI.
+testkit = []
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
