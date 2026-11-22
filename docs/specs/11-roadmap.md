@@ -33,7 +33,7 @@ Specs [04](04-timing.md), [05](05-input-safety.md). Tracks: tracker + scroll fit
 ## M5 = v0.1.0: Linux app
 Specs [07](07-app-ui.md), [10](10-release.md). Tracks: Live page; Setup wizard; Settings; event bus; release workflow + Linux tarball + PKGBUILD. Exit: manual checklist rows 1-9 on KDE and Hyprland.
 
-Status (2026-11-22, branch `m5`): all tracks built (shared `arrowhead-runner`, event bus, Tauri commands, Live/Setup/Settings, release-please, release.yml, PKGBUILD). Not yet done: the manual checklist on KDE and Hyprland, the 3% webview CPU check, repo secrets and the first tagged release.
+Status (2026-11-22): done. v0.1.0 released; manual checklist passed on KDE and Hyprland.
 
 ## v0.2.0: Windows, player model, history, overlay
 Tracks: DXGI + WGC capture; SendInput + Windows focus/hotkeys; player model + controller + presets ([06](06-humanizer.md)); HUD reader (glyph atlas, accuracy, scores, readback); Style and History pages; match my friend; overlay process; MSI build.
