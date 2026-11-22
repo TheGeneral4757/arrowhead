@@ -6,7 +6,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
-use arrowhead_core::frame::{CaptureError, FrameSource, FrameView, OwnedFrame, Rect, SourceInfo};
+use arrowhead_core::frame::{
+    AuxTap, CaptureError, FrameSource, FrameView, OwnedFrame, Rect, SourceInfo,
+};
 use arrowhead_core::input::exe_matches;
 use arrowhead_core::runtime::platform::monotonic_ns;
 use arrowhead_core::time::Nanos;
@@ -28,10 +30,12 @@ struct Shared {
     width: AtomicU32,
     height: AtomicU32,
     pts_is_receive_time: AtomicBool,
+    aux: Arc<AuxTap>,
 }
 
 struct Handler {
     shared: Arc<Shared>,
+    n: u64,
 }
 
 impl GraphicsCaptureApiHandler for Handler {
@@ -40,7 +44,10 @@ impl GraphicsCaptureApiHandler for Handler {
 
     fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
         arrowhead_core::runtime::platform::make_realtime();
-        Ok(Self { shared: ctx.flags })
+        Ok(Self {
+            shared: ctx.flags,
+            n: 0,
+        })
     }
 
     fn on_frame_arrived(
@@ -60,6 +67,27 @@ impl GraphicsCaptureApiHandler for Handler {
                 Nanos(monotonic_ns())
             }
         };
+        self.n += 1;
+        if s.aux.due(self.n).is_some() {
+            // Full-frame map, only on the frames the HUD asked for.
+            match frame.buffer() {
+                Ok(mut buf) => {
+                    let stride = buf.row_pitch() as usize;
+                    let raw = buf.as_raw_buffer();
+                    s.aux.copy_from(
+                        self.n,
+                        &FrameView {
+                            seq: self.n,
+                            pts,
+                            region: Rect::new(0, 0, fw, fh),
+                            stride,
+                            data: raw,
+                        },
+                    );
+                }
+                Err(e) => eprintln!("capture: aux copy: {e}"),
+            }
+        }
         let mut err = None;
         s.ring.produce(|slot, want| {
             let want = if want.w == 0 || want.h == 0 {
@@ -119,11 +147,11 @@ fn backend(e: impl std::fmt::Display) -> CaptureError {
 
 impl WgcSource {
     /// The primary monitor. Frames come only when the screen changes, so this does not wait.
-    pub fn open_monitor() -> Result<Self, CaptureError> {
+    pub fn open_monitor(aux: Arc<AuxTap>) -> Result<Self, CaptureError> {
         let m = Monitor::primary().map_err(backend)?;
         let (w, h) = (m.width().map_err(backend)?, m.height().map_err(backend)?);
         let hz = m.refresh_rate().unwrap_or(0) as f32;
-        let s = Self::start(Kind::WgcMonitor, m, "primary".into(), hz)?;
+        let s = Self::start(Kind::WgcMonitor, m, "primary".into(), hz, aux)?;
         s.shared.width.store(w, Ordering::Relaxed);
         s.shared.height.store(h, Ordering::Relaxed);
         Ok(s)
@@ -131,7 +159,7 @@ impl WgcSource {
 
     /// The first window whose process matches `classes`. Waits up to 3 s for a first frame
     /// (it gives the size).
-    pub fn open_window(classes: &[String]) -> Result<Self, CaptureError> {
+    pub fn open_window(classes: &[String], aux: Arc<AuxTap>) -> Result<Self, CaptureError> {
         let win = Window::enumerate()
             .map_err(backend)?
             .into_iter()
@@ -146,7 +174,7 @@ impl WgcSource {
             .monitor()
             .and_then(|m| m.refresh_rate().ok())
             .unwrap_or(0) as f32;
-        let s = Self::start(Kind::WgcWindow, win, title, hz)?;
+        let s = Self::start(Kind::WgcWindow, win, title, hz, aux)?;
         let t0 = Instant::now();
         while s.shared.width.load(Ordering::Relaxed) == 0 {
             if t0.elapsed() > Duration::from_secs(3) {
@@ -157,7 +185,13 @@ impl WgcSource {
         Ok(s)
     }
 
-    fn start<T>(kind: Kind, item: T, target: String, refresh_hz: f32) -> Result<Self, CaptureError>
+    fn start<T>(
+        kind: Kind,
+        item: T,
+        target: String,
+        refresh_hz: f32,
+        aux: Arc<AuxTap>,
+    ) -> Result<Self, CaptureError>
     where
         T: TryInto<windows_capture::settings::GraphicsCaptureItemType> + Send + 'static,
     {
@@ -166,6 +200,7 @@ impl WgcSource {
             width: AtomicU32::new(0),
             height: AtomicU32::new(0),
             pts_is_receive_time: AtomicBool::new(false),
+            aux,
         });
         let settings = Settings::new(
             item,
@@ -213,6 +248,10 @@ impl FrameSource for WgcSource {
             scale: 1.0,
             pts_is_receive_time: s.pts_is_receive_time.load(Ordering::Relaxed),
         }
+    }
+
+    fn aux(&self) -> Option<Arc<AuxTap>> {
+        Some(self.shared.aux.clone())
     }
 
     fn snapshot(&mut self) -> Result<OwnedFrame, CaptureError> {
