@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.87"
 license-file = "LICENSE"
-repository = "https://github.com/thestrongest/arrowhead"
+repository = "https://github.com/TheGeneral4757/arrowhead"
 
 # Pinned as each milestone starts using them (see docs/specs/01-workspace.md).
 [workspace.dependencies]
