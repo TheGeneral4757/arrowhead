@@ -343,6 +343,19 @@ pub struct SelfCheck {
     pub too_tight: bool,
 }
 
+/// Expected result of a style before a song (Style page).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Preview {
+    pub k: f64,
+    /// Spread of the hit error, ms (model sigma at gain `k`, slips and drift included).
+    pub sigma_ms: f64,
+    pub mean_ms: f64,
+    /// Sick, Good, Ok, Bad, Miss.
+    pub probs: [f64; 5],
+    /// Feed-forward accuracy, percent (rough: real accuracy is not count-weighted, G2).
+    pub accuracy: f64,
+}
+
 /// Model, controller and self-check in one preallocated object (no allocation per note).
 pub struct StylePlayer {
     pub style: Style,
@@ -567,6 +580,37 @@ impl StylePlayer {
         self.k = u_new.exp().clamp(K_MIN, K_MAX);
     }
 
+    /// What the Style page shows before a song: the feed-forward gain for the target and the
+    /// judgment split, spread and mean it expects on an average chart.
+    pub fn preview(&self) -> Preview {
+        let st = &self.style;
+        if self.max {
+            return Preview {
+                k: 1.0,
+                sigma_ms: 0.0,
+                mean_ms: 0.0,
+                probs: [1.0, 0.0, 0.0, 0.0, 0.0],
+                accuracy: 100.0,
+            };
+        }
+        let (mult, miss) = (self.mult_estimate(), self.miss_estimate());
+        let sigma = st.sigma0 * self.k * st.spread * mult;
+        let drift_sd = st.focus_drift * DRIFT_SD_MS;
+        let mut probs = self.judge.probs(st.bias, sigma, drift_sd, st.p_slip);
+        for p in &mut probs {
+            *p *= 1.0 - miss;
+        }
+        probs[4] += miss;
+        Preview {
+            k: self.k,
+            // The spread a hit error shows: slips widen it, drift adds in quadrature.
+            sigma_ms: (sigma * sigma * (1.0 + 8.0 * st.p_slip) + drift_sd * drift_sd).sqrt(),
+            mean_ms: st.bias,
+            probs,
+            accuracy: self.judge.expected_accuracy(st, self.k, mult, miss),
+        }
+    }
+
     pub fn stats(&self) -> SelfCheck {
         let n = self.n_err;
         let ur = if n > 1 {
@@ -709,6 +753,20 @@ pub fn find_style(config_dir: Option<&Path>, name: &str) -> Style {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_hits_target_and_sums_to_one() {
+        let g = Game::default();
+        for st in Style::builtins() {
+            let p = StylePlayer::new(st.clone(), &g, 1, 600).preview();
+            assert!(
+                (p.probs.iter().sum::<f64>() - 1.0).abs() < 1e-9,
+                "{}",
+                st.name
+            );
+            assert!((p.accuracy - st.target).abs() < 0.05, "{}: {p:?}", st.name);
+        }
+    }
 
     #[test]
     fn ks_separates_uniform_from_normal() {

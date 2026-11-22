@@ -22,6 +22,7 @@ use arrowhead_core::frame::{FrameSource, OwnedFrame, SourceInfo};
 use arrowhead_core::input::{KeyAction, key_names};
 use arrowhead_core::runtime::platform::{EXIT, install_exit_hooks};
 use arrowhead_core::session::State;
+use arrowhead_core::style::{self, Preview, Style, StylePlayer};
 use arrowhead_core::time::{Clock, Nanos, RealClock};
 use arrowhead_runner::{Control, Opts, load_config, profile_path};
 use serde::Serialize;
@@ -402,6 +403,51 @@ fn load_profile() -> CmdRes<Profile> {
 #[tauri::command]
 fn get_profile() -> CmdRes<Profile> {
     load_profile()
+}
+
+#[tauri::command]
+fn list_styles() -> Vec<Style> {
+    config_dir().map_or_else(Style::builtins, |d| style::list_styles(&d))
+}
+
+/// Makes `name` the active style (`config.toml` `style`). A running engine picks it up at its
+/// next start.
+#[tauri::command]
+fn select_style(name: String) -> CmdRes<()> {
+    let dir = config_dir().ok_or("no config dir")?;
+    if style::find_style(Some(&dir), &name).name != name {
+        return Err(format!("no style named {name:?}"));
+    }
+    let mut cfg = load_config().map_err(err)?;
+    cfg.style = name;
+    save_config(&cfg)
+}
+
+/// Saves a user style (built-in names are refused) and makes it the active one.
+#[tauri::command]
+fn save_style(style: Style) -> CmdRes<()> {
+    let dir = config_dir().ok_or("no config dir")?;
+    style::save_style(&dir, &style).map_err(err)?;
+    select_style(style.name)
+}
+
+#[tauri::command]
+fn delete_style(name: String) -> CmdRes<()> {
+    let dir = config_dir().ok_or("no config dir")?;
+    style::delete_style(&dir, &name).map_err(err)?;
+    let mut cfg = load_config().map_err(err)?;
+    if cfg.style == name {
+        cfg.style = "Max".into();
+        save_config(&cfg)?;
+    }
+    Ok(())
+}
+
+/// Expected judgments for a style (not saved), with this config's windows and weights.
+#[tauri::command]
+fn style_preview(style: Style) -> CmdRes<Preview> {
+    let cfg = load_config().map_err(err)?;
+    Ok(StylePlayer::new(style, &cfg.game, 0, 600).preview())
 }
 
 /// Newest first.
@@ -822,6 +868,11 @@ fn main() {
             select_profile,
             get_profile,
             history,
+            list_styles,
+            select_style,
+            save_style,
+            delete_style,
+            style_preview,
             run_setup_step,
             latency_key,
             test_lane,

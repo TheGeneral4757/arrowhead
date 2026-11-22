@@ -81,6 +81,11 @@ Built, not yet run on a real desktop: P4 in [12-open-questions.md](12-open-quest
 - Windows (`cfg(windows)`): layered popup (`WS_EX_LAYERED | TRANSPARENT | TOPMOST | NOACTIVATE`), `UpdateLayeredWindow` with a premultiplied BGRA DIB, per-monitor DPI aware, redraw capped to the monitor refresh and 30 Hz. Cross-checked with `cargo clippy --target x86_64-pc-windows-msvc`; not run.
 - App (`crates/app/src/overlay.rs`): spawns the binary next to the app (or `/usr/lib/arrowhead/arrowhead-overlay`) per engine start, writes through a bounded queue (a stuck overlay drops batches, never stalls the bus), kills it when the engine stops. `[ui] overlay`: `on`, `off`, or `auto` = only with one monitor. `[ui] minimise_while_playing`: `on` always, `auto` only while the overlay is up, `off` never; minimises on `Playing`, restores on Idle or Results (the Armed gap between songs keeps it down).
 
+## v0.2 notes (Style and History pages)
+- Commands added: `list_styles`, `select_style(name)`, `save_style(style)` (saves a user style and makes it active; built-in names refused), `delete_style(name)` (falls back to Max when it was active), `style_preview(style)` (the model's feed-forward gain, judgment split, spread and mean with this config's windows and weights; `StylePlayer::preview`), `history(limit, offset)` (newest first). The contract is `ui/src/api.ts`.
+- Style: picking a preset saves `config.toml` `style` at once; a running engine picks it up at its next start. Any edit (target or an advanced field) makes an unsaved draft; "Save and use" stores it as `Custom (based on X)` unless renamed. Max disables the target slider and hides the advanced drawer. The expected-result panel is labelled a model estimate (accuracy is not count-weighted, G2). Match my friend is not shown until the engine reads the opponent's score.
+- History: table of `history.jsonl` rows (50 per page, "Load older songs"), loading, empty and error states; picking a row shows its `hit_hist` over the judgment windows.
+
 ## Acceptance
 - M5: the app drives the same engine as the CLI; Live updates at 30 Hz with under 3% CPU for the webview on the dev machine; Setup completes from a clean config.
 - Every number shown is measured (no placeholder figures in release builds).

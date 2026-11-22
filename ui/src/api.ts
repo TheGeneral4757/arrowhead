@@ -110,6 +110,28 @@ export type Permissions = { uinput: Check; hotkeys: Check; screencast: Check; ga
 /** `png` is a data: URL of the full-stream snapshot; the layout is drawn over it by the UI. */
 export type Calibration = { layout: Layout; nudge: Nudge; png: string; colours_learned: boolean; trail_learned: boolean };
 export type LatencyResult = { trials: number; input_ms_p50: number; input_ms_p90: number; includes_capture: boolean };
+/** Player style (spec 06, core::style::Style). Built-ins: Max, Sweaty, Casual friend, Rusty.
+ * `miss_floor` and `miss_k` are fractions, `target` a percentage. */
+export type Style = {
+  name: string;
+  target: number;
+  sigma0: number;
+  bias: number;
+  spread: number;
+  chord: number;
+  jack: number;
+  stream: number;
+  fatigue: number;
+  focus_drift: number;
+  miss_floor: number;
+  miss_k: number;
+  p_slip: number;
+  hold_release_ms: number;
+  release_bias: number;
+  ur_min: number;
+};
+/** `probs`: Sick, Good, Ok, Bad, Miss. */
+export type StylePreview = { k: number; sigma_ms: number; mean_ms: number; probs: number[]; accuracy: number };
 export type Judgment = "sick" | "good" | "ok" | "bad" | "miss";
 /** One line of history.jsonl (spec 08). `hit_hist.counts[i]` covers [from_ms + i * bin_ms, + bin_ms). */
 export type HistoryEntry = {
@@ -165,6 +187,12 @@ export const api = {
     listen<boolean>("latency-paint", (e) => f(e.payload)),
   /** Sends one tap of `lane` (0-3) after a 2 s countdown, for the Keys step. */
   testLane: (lane: number) => invoke<void>("test_lane", { lane }),
+  listStyles: () => invoke<Style[]>("list_styles"),
+  selectStyle: (name: string) => invoke<void>("select_style", { name }),
+  /** Saves a user style and makes it active. Built-in names are refused. */
+  saveStyle: (style: Style) => invoke<void>("save_style", { style }),
+  deleteStyle: (name: string) => invoke<void>("delete_style", { name }),
+  stylePreview: (style: Style) => invoke<StylePreview>("style_preview", { style }),
   /** Newest first. */
   history: (limit: number, offset: number) => invoke<HistoryEntry[]>("history", { limit, offset }),
   calibrationSnapshot: () => invoke<Calibration>("calibration_snapshot"),
