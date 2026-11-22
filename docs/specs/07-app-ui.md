@@ -71,6 +71,16 @@ When there is only one monitor (or the user chooses), the main window minimises 
 - Session states come from `session::Session`: Searching while calibrating, Armed with a layout, Playing while confirmed heads exist, back to Armed after 3 s without one (no history in v0.1). Dry run is a scheduler gate, so it can be toggled while playing; without a writable uinput the app plays dry only.
 - Minimise on `Playing` waits for the overlay (v0.2). Window size and position are remembered (window-state plugin).
 
+### v0.2 status (overlay)
+Built, not yet run on a real desktop: P4 in [12-open-questions.md](12-open-questions.md) stays unverified until the overlay is tried over fullscreen Sober on KWin and Hyprland.
+- `arrowhead-overlay [--output NAME] [--size WxH]`: JSON array of events per stdin line, exits when stdin closes. The app passes the profile's `monitor` and `stream_size`. The output is the one named `NAME`, else the first whose current mode is `WxH`, else the first. On Linux the portal does not name the output (`monitor` is the stream id), so the size match is what picks it.
+- Redraws are capped at 30 Hz on both backends: each one re-renders and copies a full-output buffer (about 15 MB at 2560x1440), which must not take CPU from the game.
+- Input is a mirror of `EngineEvent` (`State`, `Layout`, `Notes` as `t_ms` only, `Planned`, `Pressed`, and `Readback {ms, judgment}`); anything else is ignored. The app sends only those, `Notes` at most every 100 ms. `Readback` is not emitted by the engine yet, so the judgment text and hit error bar stay empty until the HUD reader lands.
+- Drawing is a pure `render` module (tiny-skia, unit tested without a display). Layout px are stream px: everything scales by surface width / stream width. Strip boxes run from each receptor to the edge notes come from. Text is a built-in 5x7 capitals font (no font dependency).
+- Wayland (smithay-client-toolkit): layer `overlay`, anchored to all edges, exclusive zone -1, no keyboard, empty input region, shm `Argb8888`, redraw on change, after the previous frame callback and at most at 30 Hz. Integer output scale only; fractional scaling is stretched by the compositor but stays aligned.
+- Windows (`cfg(windows)`): layered popup (`WS_EX_LAYERED | TRANSPARENT | TOPMOST | NOACTIVATE`), `UpdateLayeredWindow` with a premultiplied BGRA DIB, per-monitor DPI aware, redraw capped to the monitor refresh and 30 Hz. Cross-checked with `cargo clippy --target x86_64-pc-windows-msvc`; not run.
+- App (`crates/app/src/overlay.rs`): spawns the binary next to the app (or `/usr/lib/arrowhead/arrowhead-overlay`) per engine start, writes through a bounded queue (a stuck overlay drops batches, never stalls the bus), kills it when the engine stops. `[ui] overlay`: `on`, `off`, or `auto` = only with one monitor. `[ui] minimise_while_playing`: `on` always, `auto` only while the overlay is up, `off` never; minimises on `Playing`, restores on Idle or Results (the Armed gap between songs keeps it down).
+
 ## Acceptance
 - M5: the app drives the same engine as the CLI; Live updates at 30 Hz with under 3% CPU for the webview on the dev machine; Setup completes from a clean config.
 - Every number shown is measured (no placeholder figures in release builds).

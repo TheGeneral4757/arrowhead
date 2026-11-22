@@ -5,6 +5,7 @@
 //! `arrowhead-runner`, the same one `arrowhead-cli run` drives.
 
 mod bus;
+mod overlay;
 
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
@@ -130,7 +131,7 @@ async fn with_src<T: Send + 'static>(
 fn log_tx(logs: &Arc<LogFile>) -> arrowhead_runner::Tx {
     let (tx, rx) = mpsc::sync_channel(1024);
     let logs = logs.clone();
-    std::thread::spawn(move || bus::run(rx, None, Arc::default(), logs));
+    std::thread::spawn(move || bus::run(rx, None, Arc::default(), logs, None));
     tx
 }
 
@@ -192,6 +193,7 @@ fn get_status(state: tauri::State<AppState>) -> Status {
 
 #[tauri::command]
 fn start_engine(
+    app: AppHandle,
     state: tauri::State<AppState>,
     on_event: Channel<Vec<EngineEvent>>,
     dry_run: bool,
@@ -208,9 +210,21 @@ fn start_engine(
     };
     let (tx, rx) = mpsc::sync_channel::<EngineEvent>(4096);
     let (live, logs) = (state.live.clone(), state.logs.clone());
+    let cfg = load_config().unwrap_or_default();
+    let prof = load_profile().unwrap_or_default();
+    let (overlay, overlay_err) = overlay::Overlay::start(
+        &app,
+        cfg.ui.overlay,
+        cfg.ui.minimise_while_playing,
+        &prof.monitor,
+        prof.stream_size,
+    );
+    if let Some(e) = overlay_err {
+        logs.write(Level::Warn, &format!("overlay not started: {e}"));
+    }
     std::thread::Builder::new()
         .name("bus".into())
-        .spawn(move || bus::run(rx, Some(on_event), live, logs))
+        .spawn(move || bus::run(rx, Some(on_event), live, logs, Some(overlay)))
         .map_err(err)?;
     let (src, c2, live) = (state.src.clone(), ctl.clone(), state.live.clone());
     let join = std::thread::Builder::new()
