@@ -6,7 +6,9 @@ use std::time::Duration;
 use arrowhead_core::config::WindowsBackend;
 use std::sync::Arc;
 
-use arrowhead_core::frame::{AuxTap, CaptureError, FrameSource, FrameView, OwnedFrame, Rect, SourceInfo};
+use arrowhead_core::frame::{
+    AuxTap, CaptureError, FrameSource, FrameView, OwnedFrame, Rect, SourceInfo,
+};
 
 use crate::dxgi::DxgiSource;
 use crate::ring::RingStats;
