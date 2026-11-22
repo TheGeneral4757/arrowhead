@@ -289,6 +289,20 @@ pub struct Nudge {
     pub dwidth: f32,
 }
 
+impl Nudge {
+    /// The hand correction from Setup on top of a detected layout: shift all receptors by
+    /// (dx, dy), spread them by dpitch per lane around the centre, grow the size by dwidth.
+    pub fn apply(&self, l: &crate::detect::Layout) -> crate::detect::Layout {
+        let mut out = l.clone();
+        for (i, r) in out.receptors.iter_mut().enumerate() {
+            r[0] += self.dx + (i as f32 - 1.5) * self.dpitch;
+            r[1] += self.dy;
+        }
+        out.size = (out.size + self.dwidth).max(4.0);
+        out
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Latency {
