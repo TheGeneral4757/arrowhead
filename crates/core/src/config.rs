@@ -403,6 +403,17 @@ pub struct HistoryEntry {
     pub engine_missed: u32,
     pub watchdog_releases: u32,
     pub seed: u64,
+    /// Hit-error histogram for the History page; absent on rows without hit errors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hit_hist: Option<HitHist>,
+}
+
+/// `counts[i]` holds hit errors in `[from_ms + i * bin_ms, from_ms + (i + 1) * bin_ms)`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HitHist {
+    pub from_ms: f32,
+    pub bin_ms: f32,
+    pub counts: Vec<u32>,
 }
 
 #[derive(Debug)]
@@ -509,6 +520,22 @@ pub fn append_history(path: &Path, entry: &HistoryEntry) -> io::Result<()> {
     f.sync_data()
 }
 
+/// Newest first, skipping `offset` rows. Unreadable lines (hand edits, older versions) are skipped.
+pub fn read_history(path: &Path, limit: usize, offset: usize) -> io::Result<Vec<HistoryEntry>> {
+    let text = match fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    Ok(text
+        .lines()
+        .rev()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .skip(offset)
+        .take(limit)
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -578,12 +605,23 @@ mod tests {
             engine_missed: 0,
             watchdog_releases: 0,
             seed: 1,
+            hit_hist: None,
         };
         append_history(&p, &e).unwrap();
-        append_history(&p, &e).unwrap();
+        let e2 = HistoryEntry {
+            seed: 2,
+            hit_hist: Some(HitHist { from_ms: -230.0, bin_ms: 10.0, counts: vec![0, 3, 1] }),
+            ..e.clone()
+        };
+        append_history(&p, &e2).unwrap();
         let text = fs::read_to_string(&p).unwrap();
         let lines: Vec<_> = text.lines().collect();
         assert_eq!(lines.len(), 2);
-        assert_eq!(serde_json::from_str::<HistoryEntry>(lines[1]).unwrap(), e);
+        assert_eq!(serde_json::from_str::<HistoryEntry>(lines[1]).unwrap(), e2);
+
+        fs::OpenOptions::new().append(true).open(&p).unwrap().write_all(b"not json\n").unwrap();
+        assert_eq!(read_history(&p, 10, 0).unwrap(), vec![e2.clone(), e.clone()]);
+        assert_eq!(read_history(&p, 1, 1).unwrap(), vec![e]);
+        assert!(read_history(&dir.path().join("none.jsonl"), 10, 0).unwrap().is_empty());
     }
 }

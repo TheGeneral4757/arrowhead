@@ -71,7 +71,11 @@ export type Config = {
   safety: { dry_run: boolean; require_focus_guard: boolean; max_hold_ms: number; game_window_classes: string[] };
   capture: { linux_source: "monitor" | "window"; windows_backend: "auto" | "dxgi" | "wgc-monitor" | "wgc-window" };
   timing: { commit_ms: number; late_limit_ms: number; tap_hold_ms: number; min_gap_ms: number };
-  game: unknown;
+  game: {
+    windows_ms: { sick: number; good: number; ok: number; bad: number };
+    accuracy_weights: { sick: number; good: number; ok: number; bad: number; miss: number };
+    readback_sign: number;
+  };
   ui: { overlay: AutoOnOff; minimise_while_playing: AutoOnOff };
   updates: { check: boolean };
   log: { level: string; per_note: boolean };
@@ -106,6 +110,27 @@ export type Permissions = { uinput: Check; hotkeys: Check; screencast: Check; ga
 /** `png` is a data: URL of the full-stream snapshot; the layout is drawn over it by the UI. */
 export type Calibration = { layout: Layout; nudge: Nudge; png: string; colours_learned: boolean; trail_learned: boolean };
 export type LatencyResult = { trials: number; input_ms_p50: number; input_ms_p90: number; includes_capture: boolean };
+export type Judgment = "sick" | "good" | "ok" | "bad" | "miss";
+/** One line of history.jsonl (spec 08). `hit_hist.counts[i]` covers [from_ms + i * bin_ms, + bin_ms). */
+export type HistoryEntry = {
+  v: number;
+  started: string;
+  duration_s: number;
+  song: string;
+  difficulty: string;
+  profile: string;
+  style: string;
+  target: number | null;
+  accuracy_hud: number | null;
+  counts: Partial<Record<Judgment, number>>;
+  mean_err_ms: number | null;
+  ur: number | null;
+  offset_ms: number;
+  engine_missed: number;
+  watchdog_releases: number;
+  seed: number;
+  hit_hist?: { from_ms: number; bin_ms: number; counts: number[] };
+};
 export type UpdateInfo = { version: string; notes: string | null; can_install: boolean };
 
 export const api = {
@@ -140,6 +165,8 @@ export const api = {
     listen<boolean>("latency-paint", (e) => f(e.payload)),
   /** Sends one tap of `lane` (0-3) after a 2 s countdown, for the Keys step. */
   testLane: (lane: number) => invoke<void>("test_lane", { lane }),
+  /** Newest first. */
+  history: (limit: number, offset: number) => invoke<HistoryEntry[]>("history", { limit, offset }),
   calibrationSnapshot: () => invoke<Calibration>("calibration_snapshot"),
   nudgeLayout: (n: Nudge) => invoke<Calibration>("nudge_layout", n),
   copyDiagnostics: () => invoke<string>("copy_diagnostics"),

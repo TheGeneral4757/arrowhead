@@ -121,8 +121,11 @@ A profile is matched at start by `(monitor, stream_size, scale)`; if none matche
 ```json
 {"v":1,"started":"2026-11-21T21:42:03Z","duration_s":142.5,"song":"...","difficulty":"Hard","profile":"default","style":"Sweaty","target":96.0,
  "accuracy_hud":96.21,"counts":{"sick":612,"good":41,"ok":9,"bad":2,"miss":3},"mean_err_ms":1.2,"ur":143.0,
- "offset_ms":-11.0,"engine_missed":0,"watchdog_releases":0,"seed":123456789}
+ "offset_ms":-11.0,"engine_missed":0,"watchdog_releases":0,"seed":123456789,
+ "hit_hist":{"from_ms":-230,"bin_ms":10,"counts":[0,0,1,"..."]}}
 ```
+
+`hit_hist` (optional, v0.2) holds the song's hit errors for the History page: `counts[i]` covers `[from_ms + i * bin_ms, from_ms + (i + 1) * bin_ms)`. Rows without hit errors leave it out. The app reads the file newest first and skips lines it cannot parse.
 
 ## Diagnostics ("Copy diagnostics")
 Plain text: version, OS, desktop and compositor, capture backend + stats, input backend, focus probe, hotkey backend, active profile (without file paths in the home dir), last 200 log lines at warn+, last 5 history lines. No network upload; it goes to the clipboard only.

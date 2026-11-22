@@ -12,7 +12,9 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use arrowhead_core::config::{Config, Nudge, Profile, config_dir, data_dir, load_toml, save_toml};
+use arrowhead_core::config::{
+    Config, HistoryEntry, Nudge, Profile, config_dir, data_dir, load_toml, read_history, save_toml,
+};
 use arrowhead_core::detect::Layout;
 use arrowhead_core::event::{EngineEvent, Level};
 use arrowhead_core::frame::{FrameSource, OwnedFrame, SourceInfo};
@@ -373,6 +375,13 @@ fn load_profile() -> CmdRes<Profile> {
 #[tauri::command]
 fn get_profile() -> CmdRes<Profile> {
     load_profile()
+}
+
+/// Newest first.
+#[tauri::command]
+fn history(limit: usize, offset: usize) -> CmdRes<Vec<HistoryEntry>> {
+    let Some(dir) = data_dir() else { return Ok(Vec::new()) };
+    read_history(&dir.join("history.jsonl"), limit.min(1000), offset).map_err(err)
 }
 
 #[derive(Serialize)]
@@ -783,6 +792,7 @@ fn main() {
             list_profiles,
             select_profile,
             get_profile,
+            history,
             run_setup_step,
             latency_key,
             test_lane,
