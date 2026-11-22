@@ -38,34 +38,83 @@ fn median_u8(v: &mut [u8]) -> u8 {
 }
 
 /// Per-pixel median luma of `r` (stream coords, inside every frame's region), downscaled by `ds`.
-fn median_luma(frames: &[FrameView], r: Rect, ds: u32) -> (Vec<u8>, usize, usize) {
+/// With `still`, a pixel gets the middle of its densest grey cluster (within 24 luma) if that
+/// holds at least a fifth of the frames, else the median: idle
+/// receptors are grey and do not change, while notes are coloured and their grey outlines move.
+/// In dense charts a receptor uncovered in a few frames still shows; a median gives the notes.
+fn median_luma(frames: &[FrameView], r: Rect, ds: u32, still: bool) -> (Vec<u8>, usize, usize) {
     let (w, h) = ((r.w / ds) as usize, (r.h / ds) as usize);
     let mut out = vec![0u8; w * h];
     let mut tmp = vec![0u8; frames.len()];
+    let mut grey = Vec::with_capacity(frames.len());
     for y in 0..h {
         for x in 0..w {
+            grey.clear();
             for (k, f) in frames.iter().enumerate() {
-                let mut s = 0u32;
+                let mut s = [0u32; 3];
                 for j in 0..ds {
                     let sy = r.y as usize + y * ds as usize + j as usize - f.region.y as usize;
                     for i in 0..ds {
                         let sx = r.x as usize + x * ds as usize + i as usize - f.region.x as usize;
-                        s += luma(&f.data[sy * f.stride + sx * 4..]) as u32;
+                        let p = &f.data[sy * f.stride + sx * 4..];
+                        for c in 0..3 {
+                            s[c] += p[c] as u32;
+                        }
                     }
                 }
-                tmp[k] = (s / (ds * ds)) as u8;
+                let n = ds * ds;
+                let px = [(s[0] / n) as u8, (s[1] / n) as u8, (s[2] / n) as u8];
+                tmp[k] = luma(&px) as u8;
+                if still && Opp::from_rgb(px[2], px[1], px[0]).chroma() < GREY_CHROMA {
+                    grey.push(tmp[k]);
+                }
             }
-            out[y * w + x] = median_u8(&mut tmp);
+            // Densest cluster of grey samples (within 24 luma): two pointers over the sorted values.
+            grey.sort_unstable();
+            let (mut best, mut lo) = ((0, 0), 0);
+            for hi in 0..grey.len() {
+                while grey[hi] - grey[lo] > 24 {
+                    lo += 1;
+                }
+                if hi + 1 - lo > best.1 - best.0 {
+                    best = (lo, hi + 1);
+                }
+            }
+            // A grey value seen in under a fifth of the frames is something passing (a trail over
+            // a coloured background), not a still receptor.
+            out[y * w + x] = if (best.1 - best.0) * 5 < frames.len() {
+                median_u8(&mut tmp)
+            } else {
+                grey[(best.0 + best.1) / 2]
+            };
         }
     }
     (out, w, h)
 }
 
+/// Dilate (`any` = true: some pixel in the box is set) or erode (all are set), box radius `r`.
+fn box_any(src: &[bool], w: usize, h: usize, r: usize, any: bool) -> Vec<bool> {
+    let mut out = vec![false; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let ys = y.saturating_sub(r)..(y + r + 1).min(h);
+            let mut hit = ys.clone().flat_map(|yy| {
+                (x.saturating_sub(r)..(x + r + 1).min(w)).map(move |xx| src[yy * w + xx])
+            });
+            out[y * w + x] = if any { hit.any(|v| v) } else { hit.all(|v| v) };
+        }
+    }
+    out
+}
+
+/// Chroma (|C1| + |C2|) under which a pixel counts as grey for `median_luma(still)`.
+const GREY_CHROMA: i32 = 40;
+
 /// Blobs that contrast with their surround in the median of `frames` (moving things drop out).
 pub fn find_blobs(frames: &[FrameView], stream_h: u32) -> Vec<Blob> {
     let region = frames[0].region;
     let ds = 2u32;
-    let (l, w, h) = median_luma(frames, region, ds);
+    let (l, w, h) = median_luma(frames, region, ds, true);
     // Integral image for the local mean.
     let mut ii = vec![0u64; (w + 1) * (h + 1)];
     for y in 0..h {
@@ -94,6 +143,18 @@ pub fn find_blobs(frames: &[FrameView], stream_h: u32) -> Vec<Blob> {
             } else {
                 0
             };
+        }
+    }
+    // Close 2 px gaps per class: outlines of passing notes can win a few pixels of a receptor
+    // and split it.
+    for m in [1u8, 2] {
+        let on: Vec<bool> = mask.iter().map(|&v| v == m).collect();
+        let grown = box_any(&on, w, h, 2, true);
+        let closed = box_any(&grown, w, h, 2, false);
+        for (v, &c) in mask.iter_mut().zip(&closed) {
+            if *v == 0 && c {
+                *v = m;
+            }
         }
     }
     let hh = (stream_h / ds) as f32;
@@ -186,6 +247,9 @@ pub fn find_groups(blobs: &[Blob], stream_h: u32) -> Vec<Group> {
             let dev: f32 = (0..3)
                 .map(|n| ((b[idx[n + 1]].cx - b[idx[n]].cx) - pitch).abs() / pitch)
                 .fold(0.0, f32::max);
+            if dev >= 0.08 {
+                continue;
+            }
             let ys: f32 = idx.iter().map(|&n| (b[n].cy - b[i].cy).abs()).sum::<f32>() / ytol;
             cands.push((dev + 0.1 * ys, idx));
         }
@@ -238,8 +302,8 @@ pub fn guess_scroll(g: &Group, stream_h: u32) -> Scroll {
 }
 
 /// Full-resolution median luma of `r`, row-major `r.w` wide.
-fn median_box(frames: &[FrameView], r: Rect) -> Vec<u8> {
-    median_luma(frames, r, 1).0
+fn median_box(frames: &[FrameView], r: Rect, still: bool) -> Vec<u8> {
+    median_luma(frames, r, 1, still).0
 }
 
 /// Refine centres at full resolution (spec 03 step 5). x is the centroid of the receptor's
@@ -267,7 +331,7 @@ pub fn layout_for(
             receptors[lane] = [b.cx, b.cy];
             continue;
         };
-        let l = median_box(frames, r);
+        let l = median_box(frames, r, true);
         let mut sorted = l.clone();
         sorted.sort_unstable();
         let lo = sorted[sorted.len() / 10] as i32;
@@ -344,6 +408,9 @@ fn p95_dist(px: &[Opp], c: Opp) -> i32 {
     *d.select_nth_unstable(k).1
 }
 
+/// Head candidates kept per lane (the cluster search is quadratic).
+const MAX_RUNS: usize = 400;
+
 struct HeadRun {
     colour: Opp,
     len: u32,
@@ -368,7 +435,7 @@ impl ColourLearner {
     pub fn new(layout: Layout, cfg: DetectConfig, bg_frames: &[FrameView]) -> Self {
         let strips = [0, 1, 2, 3].map(|l| layout.strip(l, &cfg));
         let bg = strips.map(|s| match s.intersect(&bg_frames[0].region) {
-            Some(r) if r == s => median_box(bg_frames, s),
+            Some(r) if r == s => median_box(bg_frames, s, false),
             _ => vec![0; (s.w * s.h) as usize],
         });
         Self {
@@ -402,28 +469,58 @@ impl ColourLearner {
             let w = s.w as usize;
             let mut fills = vec![0u16; s.h as usize];
             let mut rows: Vec<Vec<Opp>> = vec![Vec::new(); s.h as usize];
+            // Pixels clearly off the background (2x bg_tol); only these feed the trail colour.
+            let mut strong: Vec<Opp> = Vec::new();
+            let mut strong_rows = vec![(0u32, 0u32); s.h as usize];
             for (ri, row) in rows.iter_mut().enumerate() {
                 let y = s.y + ri as i32;
                 for xi in 0..w {
                     let (r, g, b) = f.px(s.x + xi as i32, y);
                     let o = Opp::from_rgb(r, g, b);
                     let bgl = self.bg[lane][ri * w + xi] as i32;
-                    if o.chroma() > self.cfg.learn_chroma
-                        || (o.2 as i32 - bgl).abs() > self.cfg.bg_tol
-                    {
+                    let dy = (o.2 as i32 - bgl).abs();
+                    if o.chroma() > self.cfg.learn_chroma || dy > self.cfg.bg_tol {
                         row.push(o);
                     }
+                    // Middle half of the strip only: a trail is always there, popups and
+                    // neighbours' edges are not.
+                    let mid = xi >= w / 4 && xi < w - w / 4;
+                    if mid && (o.chroma() > self.cfg.learn_chroma || dy > 2 * self.cfg.bg_tol) {
+                        strong.push(o);
+                    }
+                }
+                strong_rows[ri].1 = strong.len() as u32;
+                if ri + 1 < strong_rows.len() {
+                    strong_rows[ri + 1].0 = strong.len() as u32;
                 }
                 fills[ri] = row.len() as u16;
             }
             let mut runs = Vec::new();
             super::runs(
                 &fills,
-                (self.cfg.head_fill * w as f32).ceil() as u16,
+                // Trail fill (lower than head fill), so a trail stays one long run instead of
+                // breaking into head-sized pieces where its fill hovers near the head threshold.
+                (self.cfg.trail_fill * w as f32).ceil() as u16,
                 s.y,
                 &mut runs,
             );
-            for q in runs {
+            // Head candidates at the detector's own head fill (so lengths match what it sees),
+            // outside long runs; long runs (holds) at trail fill.
+            let mut hruns = Vec::new();
+            super::runs(
+                &fills,
+                (self.cfg.head_fill * w as f32).ceil() as u16,
+                s.y,
+                &mut hruns,
+            );
+            let long = |t: &super::Run| (t.b - t.a + 1) as f32 >= 1.8 * self.layout.size;
+            let cands: Vec<(super::Run, bool)> = hruns
+                .iter()
+                .filter(|q| !runs.iter().any(|t| long(t) && t.a <= q.a && q.b <= t.b))
+                .map(|q| (*q, true))
+                .chain(runs.iter().filter(|t| long(t)).map(|t| (*t, false)))
+                .collect();
+            for (q, is_head) in cands {
                 let len = (q.b - q.a + 1) as f32;
                 // Head candidates must not be cut by the strip ends or touch the receptor zone;
                 // trails usually are, and that is fine.
@@ -432,15 +529,51 @@ impl ColourLearner {
                 let px: Vec<Opp> = (q.a..=q.b)
                     .flat_map(|y| rows[(y - s.y) as usize].iter().copied())
                     .collect();
-                if whole && (0.3 * self.layout.size..=1.6 * self.layout.size).contains(&len) {
+                if is_head
+                    && whole
+                    && (0.3 * self.layout.size..=1.6 * self.layout.size).contains(&len)
+                {
+                    let colour = median_opp(&px);
+                    // A grey run barely off the background is the background animating.
+                    let bg_y = {
+                        let mut v: Vec<u8> = (q.a..=q.b)
+                            .flat_map(|y| {
+                                let r = (y - s.y) as usize;
+                                self.bg[lane][r * w..(r + 1) * w].iter().copied()
+                            })
+                            .collect();
+                        median_u8(&mut v) as i32
+                    };
+                    if colour.chroma() <= self.cfg.learn_chroma
+                        && (colour.2 as i32 - bg_y).abs() < 2 * self.cfg.bg_tol
+                    {
+                        continue;
+                    }
+                    if self.heads[lane].len() >= MAX_RUNS {
+                        continue;
+                    }
                     self.heads[lane].push(HeadRun {
-                        colour: median_opp(&px),
+                        colour,
                         len: len as u32,
                         px: px.into_iter().step_by(3).collect(),
                     });
-                } else if len >= 1.8 * self.layout.size {
-                    self.trail_runs += 1;
-                    self.trail_px.extend(px.into_iter().step_by(5));
+                } else if !is_head {
+                    // Rows whose middle half is mostly clear pixels: a trail fills it, a long
+                    // run of animated background does not.
+                    let mid_w = (w - 2 * (w / 4)) as u32;
+                    let mut rows_ok = 0;
+                    for y in q.a..=q.b {
+                        let (a, b) = strong_rows[(y - s.y) as usize];
+                        if b - a >= mid_w / 2 {
+                            rows_ok += 1;
+                            if y % 5 == 0 {
+                                self.trail_px.extend(&strong[a as usize..b as usize]);
+                            }
+                        }
+                    }
+                    if rows_ok as f32 >= self.layout.size {
+                        self.trail_runs += 1;
+                    }
                 }
             }
         }
@@ -459,7 +592,23 @@ impl ColourLearner {
         let mut head_len = [0.0; 4];
         for lane in 0..4 {
             let runs = &self.heads[lane];
-            let colours: Vec<Opp> = runs.iter().map(|r| r.colour).collect();
+            // Densest colour cluster (trail pieces or glow can make up a sizeable minority, and a
+            // per-channel median of a mixture is no colour at all).
+            let tol = cfg.head_tol_max;
+            let seed = runs
+                .iter()
+                .max_by_key(|a| {
+                    runs.iter()
+                        .filter(|b| a.colour.dist(b.colour) <= tol)
+                        .count()
+                })
+                .map(|r| r.colour)
+                .unwrap_or_default();
+            let colours: Vec<Opp> = runs
+                .iter()
+                .map(|r| r.colour)
+                .filter(|c| c.dist(seed) <= tol)
+                .collect();
             let c = median_opp(&colours);
             let inliers: Vec<&HeadRun> = runs
                 .iter()
@@ -468,10 +617,17 @@ impl ColourLearner {
             let px: Vec<Opp> = inliers.iter().flat_map(|r| r.px.iter().copied()).collect();
             heads[lane] = c;
             head_tol[lane] = p95_dist(&px, c).clamp(cfg.head_tol_min, cfg.head_tol_max);
-            let mut lens: Vec<u32> = inliers.iter().map(|r| r.len).collect();
-            lens.sort_unstable();
+            // Most common length (+/- 3 px): one head always gives the same run, merged jacks
+            // give a spread of longer ones that would drag a median up.
+            let lens: Vec<u32> = inliers.iter().map(|r| r.len).collect();
             head_len[lane] = lens
-                .get(lens.len() / 2)
+                .iter()
+                .max_by_key(|&&l| {
+                    (
+                        lens.iter().filter(|&&m| m.abs_diff(l) <= 3).count(),
+                        u32::MAX - l,
+                    )
+                })
                 .map_or(self.layout.run_len[lane], |&l| l as f32);
         }
         let tp: Vec<Opp> = self
@@ -488,7 +644,22 @@ impl ColourLearner {
         } else {
             median_u8(&mut bgl) as i32
         };
-        let t = (self.trail_runs >= 3 && tp.len() >= 200).then(|| median_opp(&tp));
+        let t = (self.trail_runs >= 3 && tp.len() >= 200).then(|| {
+            // Densest cluster, as for heads: the pool mixes trail, popups and edges.
+            let sample: Vec<Opp> = tp
+                .iter()
+                .step_by((tp.len() / 300).max(1))
+                .copied()
+                .collect();
+            let tol = cfg.trail_tol_max;
+            let seed = sample
+                .iter()
+                .max_by_key(|a| sample.iter().filter(|b| a.dist(**b) <= tol).count())
+                .copied()
+                .unwrap_or_default();
+            let near: Vec<Opp> = tp.iter().copied().filter(|p| p.dist(seed) <= tol).collect();
+            median_opp(&near)
+        });
         let (trail, trail_tol) = match t {
             Some(t)
                 if (t.2 as i32 - bg_y).abs() > 2 * cfg.bg_tol || t.chroma() > cfg.learn_chroma =>
@@ -539,7 +710,9 @@ impl Presence {
             )
         });
         let templates = boxes.map(|b| match b.intersect(&frames[0].region) {
-            Some(i) if i == b => zero_mean(median_box(frames, b).into_iter().map(|v| v as f32)),
+            Some(i) if i == b => {
+                zero_mean(median_box(frames, b, true).into_iter().map(|v| v as f32))
+            }
             _ => Vec::new(),
         });
         Self {

@@ -30,15 +30,19 @@ pub enum Event {
 #[derive(Debug)]
 pub struct Session {
     state: State,
-    /// State to return to from `Paused`, and whether focus (not the hotkey) paused it.
-    resume: Option<(State, bool)>,
+    /// State to return to when neither pause reason holds any more.
+    resume: State,
+    hotkey_paused: bool,
+    unfocused: bool,
 }
 
 impl Default for Session {
     fn default() -> Self {
         Self {
             state: State::Idle,
-            resume: None,
+            resume: State::Idle,
+            hotkey_paused: false,
+            unfocused: false,
         }
     }
 }
@@ -48,22 +52,22 @@ impl Session {
         self.state
     }
 
-    /// Applies `ev`; returns the new state if it changed.
+    /// Applies `ev`; returns the new state if it changed. `Paused` holds while the hotkey
+    /// pause or lost focus holds; resuming needs both cleared.
     pub fn on(&mut self, ev: Event) -> Option<State> {
         use {Event as E, State as S};
+        match ev {
+            E::TogglePause => self.hotkey_paused = !self.hotkey_paused,
+            E::FocusLost => self.unfocused = true,
+            E::FocusGained => self.unfocused = false,
+            _ => {}
+        }
+        let paused = self.hotkey_paused || self.unfocused;
         let next = match (self.state, ev) {
-            (S::Paused, E::TogglePause) | (S::Paused, E::FocusGained)
-                if ev == E::TogglePause || self.resume.is_some_and(|r| r.1) =>
-            {
-                self.resume.take().map_or(S::Searching, |r| r.0)
-            }
+            (S::Paused, _) if !paused => self.resume,
             (S::Paused, _) => return None,
-            (s, E::TogglePause) => {
-                self.resume = Some((s, false));
-                S::Paused
-            }
-            (s, E::FocusLost) => {
-                self.resume = Some((s, true));
+            (s, _) if paused => {
+                self.resume = s;
                 S::Paused
             }
             (S::Idle, E::Started) => S::Searching,
@@ -111,5 +115,10 @@ mod tests {
         s.on(E::TogglePause);
         assert_eq!(s.on(E::FocusGained), None);
         assert_eq!(s.on(E::TogglePause), Some(S::Armed));
+        // Hotkey resume while focus is away stays paused until focus returns.
+        s.on(E::TogglePause);
+        s.on(E::FocusLost);
+        assert_eq!(s.on(E::TogglePause), None);
+        assert_eq!(s.on(E::FocusGained), Some(S::Armed));
     }
 }

@@ -12,7 +12,7 @@ Everything that can run without a screen or keyboard runs in CI. The engine is d
 | Layer | Where | What |
 |---|---|---|
 | Unit | each crate | Classifier, run splitting, Theil-Sen, tracker association, scheduler invariants, glyph reader, config round-trip |
-| Synthetic end-to-end | `core/src/detect/synth_tests.rs` (unit tests, so they see the `testkit` module without a feature flag) | Chart -> rendered frames -> engine with `VirtualClock` + `RecordingSink` -> compare with ground truth |
+| Synthetic end-to-end | `core/src/detect/synth_tests.rs` (detection) and `core/src/engine.rs` tests (Max replay through track, plan and scheduler on a `VirtualClock`); unit tests, so they see the `testkit` module without a feature flag | Chart -> rendered frames -> engine with `VirtualClock` + `RecordingSink` -> compare with ground truth |
 | Clip regression | `tests/clips/` (LFS) | Recorded game footage -> detector + planner -> compare with labels |
 | Model statistics | `core/tests/style_*.rs` | [06](06-humanizer.md#statistical-tests-09) |
 | Manual | checklist below | Real game, real desktop |

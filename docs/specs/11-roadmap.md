@@ -28,7 +28,7 @@ Specs [02](02-capture.md), [08](08-config.md). Tracks: PipeWire backend (port fr
 Spec [03](03-detection.md), [09](09-testing.md). Tracks: synthetic frame generator; strip classifier + runs; receptor finder + side/scroll detection; colour learning; session state machine; `cli detect`.
 
 ## M4: timing, input, safety (Max plays)
-Specs [04](04-timing.md), [05](05-input-safety.md). Tracks: tracker + scroll fit + planner; scheduler + clocks; uinput sink + safety hooks; focus probes; hotkeys; latency test; `cli run`. Exit: Max clears a Hard song on Linux from the CLI.
+Specs [04](04-timing.md), [05](05-input-safety.md). Tracks: tracker + scroll fit + planner; scheduler + clocks; uinput sink + safety hooks; focus probes; hotkeys; latency test; `cli run`. Exit: Max clears a Hard song on Linux from the CLI. Readback moved to v0.2 (needs the HUD reader).
 
 ## M5 = v0.1.0: Linux app
 Specs [07](07-app-ui.md), [10](10-release.md). Tracks: Live page; Setup wizard; Settings; event bus; release workflow + Linux tarball + PKGBUILD. Exit: manual checklist rows 1-9 on KDE and Hyprland.

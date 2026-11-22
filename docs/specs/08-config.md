@@ -97,6 +97,8 @@ trail = [..]                 # absent if not learned
 trail_tol = ..
 head_len = [..]              # run length of one head per lane, px
 
+[layout]                     # full layout from the last calibration (receptors, size, run_len, run_shape, scroll, stream); lets a run skip the receptor search
+
 [latency]
 capture_ms = 6.1
 input_ms = 4.8

@@ -12,6 +12,8 @@ use arrowhead_core::time::Nanos;
 use clap::{Parser, Subcommand};
 
 mod detect;
+mod latency;
+mod run;
 
 #[derive(Parser)]
 #[command(name = "arrowhead-cli", version = arrowhead_core::VERSION, about = "arrowhead headless tools")]
@@ -78,11 +80,44 @@ enum Cmd {
         /// Summary only, no per-frame lines
         #[arg(short, long)]
         quiet: bool,
+        /// Also run the tracker and planner and report what would be pressed (no keys)
+        #[arg(long)]
+        plan: bool,
     },
-    /// Play the game (M4)
-    Run,
-    /// Benchmark the scan path (M3)
-    Bench,
+    /// Calibrate on the live screen, then play. Dry run (no keys) unless --live
+    Run {
+        /// Actually send keys (uinput). Without this nothing is pressed
+        #[arg(long)]
+        live: bool,
+        #[arg(long, default_value_t = 60.0)]
+        seconds: f32,
+        /// Added to every press: negative presses earlier. Default: the profile's
+        /// latency.game_bias_ms
+        #[arg(long, allow_hyphen_values = true)]
+        offset_ms: Option<f64>,
+        /// Seconds of song used to learn colours before playing
+        #[arg(long, default_value_t = 8.0)]
+        learn: f32,
+        /// Ignore the colours saved in the profile and learn them again (skin change)
+        #[arg(long)]
+        relearn: bool,
+    },
+    /// Show which window the focus guard thinks is active
+    Focus {
+        #[arg(long, default_value_t = 10.0)]
+        seconds: f32,
+    },
+    /// Input latency test: this terminal flashes on a uinput key, the capture times it.
+    /// Keep the terminal focused, large and on the captured monitor
+    Latency {
+        #[arg(long, default_value_t = 50)]
+        trials: u32,
+    },
+    /// Measure scheduler lateness on the real clock (no keys sent)
+    Bench {
+        #[arg(long, default_value_t = 1000)]
+        presses: u32,
+    },
 }
 
 fn parse_rect(s: &str) -> Result<Rect, String> {
@@ -123,6 +158,7 @@ fn main() -> ExitCode {
             debug_png,
             every,
             quiet,
+            plan,
         } => {
             if let Some(d) = &debug_png
                 && let Err(e) = std::fs::create_dir_all(d)
@@ -136,9 +172,32 @@ fn main() -> ExitCode {
                 debug_png: debug_png.as_deref(),
                 every,
                 quiet,
+                plan,
             })
         }
-        Cmd::Run | Cmd::Bench => Err("not implemented yet".into()),
+        Cmd::Run {
+            live,
+            seconds,
+            offset_ms,
+            learn,
+            relearn,
+        } => open_screen().and_then(|mut src| {
+            run::run(
+                &mut src,
+                run::Opts {
+                    live,
+                    seconds,
+                    offset_ms,
+                    learn_s: learn,
+                    relearn,
+                },
+            )
+        }),
+        Cmd::Focus { seconds } => run::focus(seconds),
+        Cmd::Bench { presses } => run::bench(presses),
+        Cmd::Latency { trials } => {
+            open_screen().and_then(|mut src| latency::latency(&mut src, trials))
+        }
     };
     match res {
         Ok(()) => ExitCode::SUCCESS,
