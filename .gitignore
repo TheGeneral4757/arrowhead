@@ -5,3 +5,5 @@ node_modules/
 .env
 # third-party thumbnails used for research; kept locally, not published
 docs/research/ff-refs/
+ui/dist/
+crates/app/gen/

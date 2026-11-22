@@ -1,0 +1,19 @@
+[package]
+name = "arrowhead-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+
+[[bin]]
+name = "arrowhead"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+arrowhead-core.workspace = true
+tauri.workspace = true
+serde.workspace = true
+serde_json.workspace = true

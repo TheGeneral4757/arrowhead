@@ -1,0 +1,9 @@
+[package]
+name = "arrowhead-input"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+
+[dependencies]
+arrowhead-core.workspace = true

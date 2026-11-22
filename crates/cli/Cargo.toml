@@ -1,0 +1,15 @@
+[package]
+name = "arrowhead-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+
+[[bin]]
+name = "arrowhead-cli"
+path = "src/main.rs"
+
+[dependencies]
+arrowhead-core.workspace = true
+arrowhead-capture.workspace = true
+arrowhead-input.workspace = true

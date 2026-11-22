@@ -1,0 +1,24 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.87"
+license-file = "LICENSE"
+repository = "https://github.com/TheGeneral4757/arrowhead"
+
+# Pinned as each milestone starts using them (see docs/specs/01-workspace.md).
+[workspace.dependencies]
+arrowhead-core = { path = "crates/core" }
+arrowhead-capture = { path = "crates/capture" }
+arrowhead-input = { path = "crates/input" }
+tauri = "2.12"
+tauri-build = "2.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

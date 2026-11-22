@@ -3,9 +3,9 @@
 Guidance for Claude Code in this repo.
 
 ## Project
-arrowhead: screen-reading Funky Friday (Roblox) autoplayer, 4K only, for private servers. Rust Cargo workspace + Tauri 2 app with a React/TS front end. Linux first (KDE Plasma 6 test target, Hyprland daily), Windows in v0.2. Successor to `~/GitHub/fnf-thing-v2` (reference code for the PipeWire, uinput, DXGI and SendInput backends).
+arrowhead: screen-reading Funky Friday (Roblox) autoplayer, 4-key ("4K") mode only, for private servers. Dev setup: game on a 2560x1440 165 Hz monitor (DP-2). Rust Cargo workspace + Tauri 2 app with a React/TS front end. Linux first (KDE Plasma 6 test target, Hyprland daily), Windows in v0.2. Successor to `~/GitHub/fnf-thing-v2` (reference code for the PipeWire, uinput, DXGI and SendInput backends).
 
-**Status:** docs only. Next milestone is M0 (game facts) then M1 (workspace + CI). See `docs/specs/11-roadmap.md`.
+**Status:** M0 game facts mostly answered (see `12-open-questions.md`); M1 (workspace, CI, app shell, CLI skeleton) done on branch `m1`. Next is M2 (capture, clips, config). See `docs/specs/11-roadmap.md`.
 
 ## Where things are
 | Need | Read |
@@ -28,7 +28,7 @@ arrowhead: screen-reading Funky Friday (Roblox) autoplayer, 4K only, for private
 - Conventional commits, one PR per milestone. Straight quotes and plain hyphens.
 - Do not run the app or send keys against the real game without the user asking: it acts on their Roblox account.
 
-## Commands (after M1)
+## Commands
 | Task | Command |
 |---|---|
 | Tests | `cargo test --workspace` |

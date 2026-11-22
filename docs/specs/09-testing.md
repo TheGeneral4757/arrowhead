@@ -26,7 +26,7 @@ Inputs: a chart (list of `{lane, time_ms, hold_ms}`), a `Scene`:
 | refresh / capture rate | 60, 144, 165, 240 |
 | scroll | up, down |
 | speed (px per ms) | 0.4 to 3.0, plus a mid-song change |
-| side | left, right; opponent lanes also animated |
+| side | centre (large, ours) + smaller opponent group on the right, also animated; left/right for robustness |
 | head shape | circle, arrow, square (random per suite) |
 | colours | random per lane per suite, including low-saturation and near-background colours |
 | background | black, noisy, slowly animated gradient |
