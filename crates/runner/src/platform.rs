@@ -1,8 +1,11 @@
 //! OS pieces of a run: key sink, hotkeys, focus probe, permission checks (spec 05, 07).
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+#[cfg(target_os = "linux")]
+use std::sync::atomic::Ordering;
 use std::sync::mpsc;
+#[cfg(target_os = "linux")]
 use std::time::Duration;
 
 use arrowhead_core::config::Config;

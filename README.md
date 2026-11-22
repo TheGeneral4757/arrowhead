@@ -8,6 +8,8 @@ Successor to fnf-thing-v2. Rewritten from scratch in Rust.
 
 > **Status: v0.1 in progress.** The Linux app and CLI play from the screen (M5). See [the roadmap](docs/specs/11-roadmap.md).
 
+> **AI use.** This entire codebase (code, specs, docs, UI and CI) was generated with AI, using Claude Code with Anthropic's Claude Opus 5.5, directed and tested by a human. Commits carry a `Co-Authored-By: Claude` trailer. Review it with that in mind.
+
 > **Risk.** Automating input in Roblox breaks its Terms of Use and can get an account banned. arrowhead is for private servers with people who know. You carry the risk.
 
 ## What it does
