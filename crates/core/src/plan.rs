@@ -72,6 +72,8 @@ struct Pending {
 }
 
 const PENDING_CAP: usize = 128;
+/// Shortest hold a jack press keeps before the next press (spec 04, jacks).
+const MIN_HELD_MS: f64 = 8.0;
 
 pub struct Planner {
     pub cfg: PlanConfig,
@@ -158,6 +160,26 @@ impl Planner {
         }
     }
 
+    /// Earliest press for a styled note in `lane` crossing at `cross`: after the earlier notes
+    /// of that lane (their committed or planned press, 8 ms held, `min_gap`), so style errors
+    /// never swap the notes of a jack. Max needs none: its presses keep crossing order.
+    fn lane_floor(&self, lane: u8, cross: f64) -> f64 {
+        let c = &self.cfg;
+        self.pending
+            .iter()
+            .filter(|p| p.lane == lane && p.cross < cross - SAME_NOTE_MS && !p.draw.miss)
+            .map(|p| {
+                self.commits
+                    .iter()
+                    .find(|k| k.id == p.id)
+                    .map_or(p.cross + c.offset_ms + p.draw.error_ms, |k| k.press)
+            })
+            .filter(|x| x.is_finite())
+            .fold(f64::NEG_INFINITY, f64::max)
+            + MIN_HELD_MS
+            + c.min_gap_ms
+    }
+
     /// The style draw for a track: made once, when the note is first planned.
     fn draw_for(&mut self, tr: &Tracker, id: u32, lane: u8, cross: f64) -> NoteDraw {
         if let Some(p) = self
@@ -232,8 +254,23 @@ impl Planner {
         } else {
             (press + c.tap_hold_ms).max(now_ms.min(press + c.max_hold_ms))
         };
-        // Jack: leave min_gap before the next press in this lane.
-        let next_press = next_head + c.offset_ms;
+        // Jack: leave min_gap before the next press in this lane. Styled, that press carries
+        // its own error (none if the style misses it) and is never before this one + 8 ms + gap.
+        let mut next_press = next_head + c.offset_ms;
+        if self.style.is_some() && next_head.is_finite() {
+            match self
+                .pending
+                .iter()
+                .find(|p| p.lane == lane && (p.cross - next_head).abs() < SAME_NOTE_MS)
+            {
+                Some(p) if p.draw.miss => next_press = f64::INFINITY,
+                Some(p) => {
+                    next_press =
+                        (next_press + p.draw.error_ms).max(press + MIN_HELD_MS + c.min_gap_ms)
+                }
+                None => next_press = next_press.max(press + MIN_HELD_MS + c.min_gap_ms),
+            }
+        }
         if rel > next_press - c.min_gap_ms {
             rel = next_press - c.min_gap_ms;
         }
@@ -276,6 +313,9 @@ impl Planner {
                 continue;
             }
             let mut press = cross + c.offset_ms + draw.error_ms;
+            if self.style.is_some() {
+                press = press.max(self.lane_floor(t.lane, cross));
+            }
             if press - now_ms >= horizon {
                 continue;
             }

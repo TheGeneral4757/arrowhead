@@ -85,6 +85,8 @@ mod tests {
         missed_by_engine: u32,
         presses: usize,
         style_misses: u32,
+        /// Presses held under 8 ms: a jack whose notes were pressed out of order.
+        short_presses: usize,
     }
 
     fn worst(cur: &mut f64, err: f64) {
@@ -198,6 +200,11 @@ mod tests {
                     None => sc.unpressed += 1,
                 }
             }
+            sc.short_presses += presses
+                .iter()
+                .zip(&releases)
+                .filter(|(p, r)| r.ms_since(**p) < 7.9)
+                .count();
             sc.extra += used.iter().filter(|u| !**u).count();
             sc.presses += presses.len();
         }
@@ -237,6 +244,17 @@ mod tests {
             sc.presses >= sc.notes - sc.style_misses as usize - 8,
             "{sc:?}"
         );
+    }
+
+    #[test]
+    fn styled_jacks_keep_note_order() {
+        // Rusty's wide errors would swap the notes of 50-100 ms jacks without the lane floor.
+        for seed in [72, 90, 91] {
+            let st = Style::builtin("Rusty").unwrap();
+            let p = StylePlayer::new(st, &Game::default(), seed, 200).with_fixed_k(1.5);
+            let sc = suite_with(seed, 144.0, 2.0, Scroll::Up, 200, Some(p));
+            assert_eq!(sc.short_presses, 0, "seed {seed}: {sc:?}");
+        }
     }
 
     #[test]
