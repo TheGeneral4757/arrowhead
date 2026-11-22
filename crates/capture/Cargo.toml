@@ -7,3 +7,14 @@ license-file.workspace = true
 
 [dependencies]
 arrowhead-core.workspace = true
+zstd.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd.workspace = true
+pipewire.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -75,6 +75,14 @@ WGC draws a yellow border unless borderless capture is granted; request it, and 
 - `ClipRecorder` taps the ring (copy on the capture thread is not allowed; the scan thread hands frames to a recorder channel with a bounded queue and counts drops).
 - Labels sidecar `<clip>.labels.json`: optional per-note ground truth `{ lane, cross_pts, hold_end_pts, judgment_readback_ms }`.
 
+## M2 notes (2026-11-21)
+- Byte layout, little-endian: `u32 header_len`, header JSON, frames (`u64 pts_ns, u64 seq, u32 len, zstd level 1`), index (`u64` offset per frame), `u64 frame_count`, `AHCLIP01`. A clip without the trailer (recording killed) is rejected.
+- `ReplaySource` reports the end of the clip as `SourceLost`. `set_region` crops inside the recorded region.
+- `arrowhead-cli import <video> -o <clip> --region x,y,w,h [--start s] [--seconds s]` converts M0 screen recordings through ffmpeg (bgr0 rawvideo); pts = start + frame number / fps, so it suits constant-rate recordings only.
+- The portal session and its D-Bus connection are kept open for the life of the source (v2 dropped them after the handshake).
+- Frame pts comes from `SPA_META_Header`, requested with a `ParamMeta` update after the format is negotiated.
+- Size: a 840x1440 playfield crop at 165 fps is about 42 MB/s on disk; lane-strip regions will be far smaller.
+
 ## Acceptance
 - M2: `arrowhead-cli capture --seconds 10` prints fps, interval and pts-age percentiles from the real portal on KDE and Hyprland; `record` writes a clip that `replay` reads back bit-exact.
 - Capture of a 4 x 60 x 900 px region holds the monitor refresh rate with `copy_us_p99 < 500`.
