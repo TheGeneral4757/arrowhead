@@ -103,8 +103,8 @@ pub fn run(o: Opts) -> Res {
     );
 
     let mut det = Detector::new(layout.clone(), cfg, colours);
-    for l in 0..4 {
-        det.set_background(l, &learner.bg[l]);
+    for (l, bg) in learner.bg.iter().enumerate() {
+        det.set_background(l, bg);
     }
     let mut buf = Vec::new();
     let mut obs: Vec<NoteObs> = Vec::with_capacity(64);
