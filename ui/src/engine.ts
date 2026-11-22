@@ -1,9 +1,10 @@
 // Engine state for the whole app: one store fed by the event channel, so pages can come and go.
 import { useSyncExternalStore } from "react";
-import { api, type Dot, type EngineEvent, type Pipeline, type Scroll, type SessionState } from "./api";
+import { api, type Dot, type EngineEvent, type GameStats, type Judgment, type Pipeline, type Scroll, type SessionState } from "./api";
 
 export type LogLine = { level: "info" | "warn" | "error"; text: string; at: number };
 export type Planned = { id: number; lane: number; at_ms: number };
+export type Hit = { ms: number; judgment: Judgment };
 
 type Snapshot = {
   running: boolean;
@@ -16,6 +17,10 @@ type Snapshot = {
   logs: LogLine[];
   hotkeys: { bound: string | null; error: string | null } | null;
   error: string | null;
+  stats: GameStats | null;
+  /** Last 40 hits read back from the game, oldest first. */
+  hits: Hit[];
+  offset: number | null;
 };
 
 // Fast-changing data the canvas reads every frame without re-rendering React.
@@ -38,6 +43,9 @@ let snap: Snapshot = {
   logs: [],
   hotkeys: null,
   error: null,
+  stats: null,
+  hits: [],
+  offset: null,
 };
 const subs = new Set<() => void>();
 function set(p: Partial<Snapshot>) {
@@ -49,6 +57,7 @@ function onBatch(batch: EngineEvent[]) {
   const p: Partial<Snapshot> = {};
   let logs: LogLine[] | null = null;
   let pipeline: Pipeline[] | null = null;
+  let hits: Hit[] | null = null;
   for (const e of batch) {
     switch (e.type) {
       case "State":
@@ -78,6 +87,16 @@ function onBatch(batch: EngineEvent[]) {
       case "Focus":
         p.focus = e.focused;
         break;
+      case "Readback":
+        hits = [...(hits ?? snap.hits), { ms: e.ms, judgment: e.judgment }].slice(-40);
+        p.offset = e.offset_ms;
+        break;
+      case "Stats": {
+        const { type: _t, ...st } = e;
+        void _t;
+        p.stats = st;
+        break;
+      }
       case "Hotkeys":
         p.hotkeys = { bound: e.bound, error: e.error };
         break;
@@ -95,6 +114,7 @@ function onBatch(batch: EngineEvent[]) {
   }
   if (logs) p.logs = logs;
   if (pipeline) p.pipeline = pipeline;
+  if (hits) p.hits = hits;
   if (Object.keys(p).length) set(p);
 }
 
@@ -107,7 +127,7 @@ export const engine = {
   async start(dryRun: boolean) {
     frame.dots = [];
     frame.planned = [];
-    set({ running: true, state: "Searching", dryRun, paused: false, error: null, pipeline: [], logs: [], hotkeys: null, layout: null });
+    set({ running: true, state: "Searching", dryRun, paused: false, error: null, pipeline: [], logs: [], hotkeys: null, layout: null, stats: null, hits: [], offset: null });
     try {
       await api.startEngine(onBatch, dryRun);
     } catch (e) {

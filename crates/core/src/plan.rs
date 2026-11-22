@@ -112,6 +112,19 @@ impl Planner {
         self.style.as_ref()
     }
 
+    pub fn style_mut(&mut self) -> Option<&mut StylePlayer> {
+        self.style.as_mut()
+    }
+
+    /// Error the style meant for track `id`'s press, ms (positive = late); 0 for Max or an
+    /// unknown id. Readback compares the game's hit error with it (spec 04).
+    pub fn intended_err(&self, id: u32) -> f32 {
+        self.pending
+            .iter()
+            .find(|p| p.id == id)
+            .map_or(0.0, |p| p.draw.error_ms as f32)
+    }
+
     /// Accuracy shown by the game (percent), for the controller; `None` uses our own estimate.
     pub fn feed_accuracy(&mut self, measured: Option<f64>) {
         if let Some(s) = self.style.as_mut() {

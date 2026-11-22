@@ -93,6 +93,21 @@ pub struct Pipeline {
     pub watchdog: u32,
 }
 
+/// `None` = not readable (yet).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize)]
+pub struct Stats {
+    /// Accuracy the game shows, percent.
+    pub accuracy: Option<f32>,
+    /// Sick, Good, Ok, Bad, Miss as the game shows them.
+    pub counts: [Option<u32>; 5],
+    /// From readback this song.
+    pub mean_err_ms: Option<f32>,
+    pub ur: Option<f32>,
+    pub readbacks: u32,
+    /// The style's target, percent; None for Max.
+    pub target: Option<f32>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type")]
 // Notes is large on purpose: boxing it would allocate on the scan thread for every frame.
@@ -151,6 +166,17 @@ pub enum EngineEvent {
         level: Level,
         text: String,
     },
+    /// One of our hits read back from the game's ms readout (spec 04, readback).
+    Readback {
+        /// Hit error, ms, positive = late.
+        ms: f32,
+        /// The count row that went up with it, when exactly one did; else from the windows.
+        judgment: &'static str,
+        /// Offset after this read.
+        offset_ms: f32,
+    },
+    /// Song totals from the HUD and readback, about twice a second while playing.
+    Stats(Stats),
     /// The engine stopped; `error` is set when it stopped on an error.
     Stopped {
         error: Option<String>,

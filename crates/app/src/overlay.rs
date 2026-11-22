@@ -133,6 +133,7 @@ impl Overlay {
                     | EngineEvent::Layout { .. }
                     | EngineEvent::Planned { .. }
                     | EngineEvent::Pressed { .. }
+                    | EngineEvent::Readback { .. }
             )
             && let Ok(v) = serde_json::to_value(e)
         {

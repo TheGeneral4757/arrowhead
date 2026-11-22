@@ -526,6 +526,61 @@ impl HudReader {
         }
     }
 
+    /// The ms readout in `r`: (value as shown, blank). Blank = no text there this tick.
+    pub fn read_ms(&mut self, f: &FrameView, r: Rect) -> (Option<f32>, bool) {
+        match self.seg.segment(f, r) {
+            None => (None, true),
+            Some(_) => (
+                self.read_text(f, r, Face::Ms).and_then(|t| parse_ms(&t)),
+                false,
+            ),
+        }
+    }
+
+    pub fn read_score(&mut self, f: &FrameView, r: Rect) -> Option<i32> {
+        self.read_text(f, r, Face::Score)
+            .and_then(|t| parse_int(&t))
+    }
+
+    /// Teach one row of a stack (`stack` is its region) from the value it must show, and keep
+    /// the new glyphs only if the row then reads back as `value` (a glyph that contradicts a
+    /// known one ties with it and fails that read). Returns whether it was kept.
+    pub fn teach_row(
+        &mut self,
+        f: &FrameView,
+        l: Layout,
+        stack: Rect,
+        row: usize,
+        value: &str,
+    ) -> bool {
+        let labels = l.labels();
+        let Some(&lab) = labels.get(row) else {
+            return false;
+        };
+        let rows = self.seg.rows_in(f, stack, labels.len());
+        let Some(&r) = rows.get(row).filter(|_| rows.len() == labels.len()) else {
+            return false;
+        };
+        let backup = self.atlas.clone();
+        let chars: Vec<char> = value.chars().filter(|c| !c.is_whitespace()).collect();
+        let taught = (|| {
+            let seg_row = self.seg.segment(f, r)?;
+            let k = seg_row.label_len(lab.split(' ').count())?;
+            let cells = explode(&self.seg, &seg_row.cells[k..], &chars)?;
+            for (c, &ch) in cells.iter().zip(&chars) {
+                self.atlas.add_glyph(l.face(), ch, c);
+            }
+            Some(())
+        })()
+        .is_some();
+        let want: String = chars.into_iter().collect();
+        let ok = taught && self.read_row(f, r, l.face(), lab).as_deref() == Some(want.as_str());
+        if !ok {
+            self.atlas = backup;
+        }
+        ok
+    }
+
     /// One tick on the known regions. Cheap; allocation only for the small strings.
     pub fn read(&mut self, f: &FrameView) -> HudRead {
         let mut out = HudRead::default();
@@ -536,19 +591,14 @@ impl HudReader {
             out.counts = Some(self.read_counts(f, r)).filter(|c| *c != Counts::default());
         }
         if let Some(r) = self.locs.ms {
-            match self.seg.segment(f, r) {
-                None => out.ms_blank = true,
-                Some(_) => out.ms = self.read_text(f, r, Face::Ms).and_then(|t| parse_ms(&t)),
-            }
+            (out.ms, out.ms_blank) = self.read_ms(f, r);
         }
         for (i, r) in [self.locs.score_left, self.locs.score_right]
             .into_iter()
             .enumerate()
         {
             if let Some(r) = r {
-                out.scores[i] = self
-                    .read_text(f, r, Face::Score)
-                    .and_then(|t| parse_int(&t));
+                out.scores[i] = self.read_score(f, r);
             }
         }
         out

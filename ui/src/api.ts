@@ -37,7 +37,19 @@ export type EngineEvent =
   | { type: "Focus"; focused: boolean | null }
   | { type: "Hotkeys"; bound: string | null; error: string | null }
   | { type: "Log"; level: "info" | "warn" | "error"; text: string }
+  | { type: "Readback"; ms: number; judgment: Judgment; offset_ms: number }
+  | ({ type: "Stats" } & GameStats)
   | { type: "Stopped"; error: string | null };
+
+/** HUD totals for the song (spec 07, Stats). `counts`: Sick, Good, Ok, Bad, Miss. `null` = not readable yet. */
+export type GameStats = {
+  accuracy: number | null;
+  counts: (number | null)[];
+  mean_err_ms: number | null;
+  ur: number | null;
+  readbacks: number;
+  target: number | null;
+};
 
 export type SourceInfo = {
   width: number;

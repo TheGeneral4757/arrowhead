@@ -380,3 +380,39 @@ fn regions_roundtrip_through_profile() {
         (loc.stats, loc.counts, loc.ms)
     );
 }
+
+#[test]
+fn teach_row_learns_a_digit_and_refuses_a_wrong_one() {
+    // Bootstrapped from zeros only, then Hits ticks 0 -> 1.
+    let mut rd = HudReader::new(Atlas::default(), 0.25);
+    let zero = scene(
+        &["0.00%", "0", "0", "0", "0", "0.00ms", "0"],
+        &["0"; 5],
+        None,
+        ["0", "0"],
+    );
+    rd.teach_stack(
+        &zero.view(),
+        Layout::Stats,
+        &["0.00%", "0", "0", "0", "0", "0.00ms", "0"],
+    )
+    .unwrap();
+    let one = scene(
+        &["0.00%", "1", "1", "1", "0", "0.00ms", "0"],
+        &["0"; 5],
+        None,
+        ["0", "0"],
+    );
+    let stats = rd.locate(&one.view()).stats.unwrap();
+    assert_eq!(
+        rd.read_stats(&one.view(), stats).hits,
+        None,
+        "1 not taught yet"
+    );
+    assert!(rd.teach_row(&one.view(), Layout::Stats, stats, 3, "1"));
+    assert_eq!(rd.read_stats(&one.view(), stats).hits, Some(1));
+    // Combo shows 1 too; claiming it shows 0 contradicts the known '0' and is refused.
+    let before = rd.atlas.to_bytes();
+    assert!(!rd.teach_row(&one.view(), Layout::Stats, stats, 2, "0"));
+    assert_eq!(rd.atlas.to_bytes(), before);
+}

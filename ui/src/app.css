@@ -108,6 +108,17 @@ kbd { font-family: var(--font-mono); font-size: var(--text-sm); min-width: 2rem;
 .log .warn { color: var(--judge-bad); }
 .log .error { color: var(--color-bad); }
 
+.acc-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-sm); }
+.acc { font-size: var(--text-2xl); }
+.accent { color: var(--color-accent); }
+.judges { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-xs); }
+.judge { display: grid; gap: var(--space-3xs); justify-items: start; }
+.judge .sw { width: 0.625rem; height: 0.625rem; border-radius: 2px; }
+.hitbar svg { height: 2.5rem; }
+.hitbar .tick { fill: var(--color-cool); }
+.hitbar .tick.judge-sick { fill: var(--judge-sick); } .hitbar .tick.judge-good { fill: var(--judge-good); } .hitbar .tick.judge-ok { fill: var(--judge-ok); } .hitbar .tick.judge-bad { fill: var(--judge-bad); } .hitbar .tick.judge-miss { fill: var(--judge-miss); }
+.hitbar .mean { fill: var(--color-accent); }
+
 /* setup */
 .steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-2xs); list-style: none; margin: 0; padding: 0; counter-reset: st; }
 .steps li { counter-increment: st; border-top: 2px solid var(--color-rule); }

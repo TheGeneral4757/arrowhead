@@ -22,6 +22,7 @@ use arrowhead_core::sched::{SchedEvent, Scheduler};
 use arrowhead_core::session::{Event as SEv, Session};
 use arrowhead_core::time::{Clock, RealClock};
 
+mod hud;
 pub mod latency;
 pub mod platform;
 
@@ -422,6 +423,8 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
     let offset_ms = o.offset_ms.unwrap_or(prof.latency.game_bias_ms as f64);
     let mut learning = colours.trail.is_none();
     let dcfg = DetectConfig::default();
+    let dcfg_hud = dcfg.clone();
+    let prof_path_hud = prof_path.clone();
     let mut det = Detector::new(layout.clone(), dcfg, colours);
     for (l, bg) in learner.bg.iter().enumerate() {
         det.set_background(l, bg);
@@ -447,6 +450,12 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
                     if let Ok(c) = learner.finish()
                         && c.trail.is_some()
                     {
+                        // The HUD thread saves the profile too: start from what is on disk.
+                        if let Some(p) = prof_path.as_deref()
+                            && let Ok(disk) = load_toml::<Profile>(p)
+                        {
+                            prof = disk;
+                        }
                         if let Some(pc) = prof.colours.as_mut() {
                             pc.trail = c.trail;
                             pc.trail_tol = c.trail_tol;
@@ -463,20 +472,50 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
     let mut eng = Engine::new(det, plan);
     // Player style from config.toml (spec 06); Max or an unknown name leaves the planner unchanged.
     let style = arrowhead_core::style::find_style(config_dir().as_deref(), &cfg.style);
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos() as u64);
+    let (style_name, style_target) = (
+        style.name.clone(),
+        (!style.is_max()).then_some(style.target as f32),
+    );
     if !style.is_max() {
         log(
             &tx,
             Level::Info,
             format!("style: {} (target {}%)", style.name, style.target),
         );
-        let seed = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_nanos() as u64);
         eng.planner
             .set_style(arrowhead_core::style::StylePlayer::new(
                 style, &cfg.game, seed, 600,
             ));
     }
+
+    // HUD reader and readback (spec 03, 04) on their own thread; channels only.
+    let (hud_tx, hud_rx) = mpsc::sync_channel::<hud::ToHud>(256);
+    let (from_hud_tx, from_hud) = mpsc::channel::<hud::FromHud>();
+    let r = layout.receptors;
+    let hud_thread = hud::spawn(
+        src.aux(),
+        hud::HudSetup {
+            profile: cfg.profile.clone(),
+            prof_path: prof_path_hud,
+            hud: prof.hud.clone(),
+            stream: layout.stream,
+            receptors_x: r.map(|p| p[0]),
+            pitch: (r[3][0] - r[0][0]).abs() / 3.0,
+            max_sad: dcfg_hud.glyph_max_sad,
+            offset_ms: offset_ms as f32,
+            readback_sign: f32::from(cfg.game.readback_sign),
+            windows: cfg.game.windows_ms.clone(),
+            style: style_name,
+            target: style_target,
+            seed,
+        },
+        hud_rx,
+        from_hud_tx,
+        tx.clone(),
+    )?;
 
     // Focus guard (S3): fail open with a warning unless the config requires it.
     let focus = Arc::new(AtomicBool::new(true));
@@ -619,18 +658,42 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
                 }
                 Hotkey::NudgeUp | Hotkey::NudgeDown => {
                     let d = if h == Hotkey::NudgeUp { 1.0 } else { -1.0 };
-                    eng.planner.cfg.offset_ms += d;
-                    log(
-                        &tx,
-                        Level::Info,
-                        format!("offset {:+.1} ms", eng.planner.cfg.offset_ms),
-                    );
+                    // Styled: +/- 0.5% target; Max: +/- 1 ms offset (spec 05).
+                    if let Some(p) = eng.planner.style_mut() {
+                        p.style.target = (p.style.target + 0.5 * d).clamp(70.0, 100.0);
+                        log(&tx, Level::Info, format!("target {:.1}%", p.style.target));
+                    } else {
+                        eng.planner.cfg.offset_ms += d;
+                        log(
+                            &tx,
+                            Level::Info,
+                            format!("offset {:+.1} ms", eng.planner.cfg.offset_ms),
+                        );
+                    }
                 }
-                Hotkey::CycleStyle => log(
-                    &tx,
-                    Level::Info,
-                    "presets arrive in v0.2 (Max only for now)",
-                ),
+                Hotkey::CycleStyle => {
+                    // Next style in the list; it takes over from the next note.
+                    let list = config_dir()
+                        .map_or_else(arrowhead_core::style::Style::builtins, |d| {
+                            arrowhead_core::style::list_styles(&d)
+                        });
+                    let cur = eng.planner.style().map_or("Max", |p| p.style.name.as_str());
+                    let i = list
+                        .iter()
+                        .position(|st| st.name == cur)
+                        .map_or(0, |i| i + 1);
+                    let next = list[i % list.len()].clone();
+                    log(&tx, Level::Info, format!("style: {}", next.name));
+                    let mut c = load_config().unwrap_or_default();
+                    c.style = next.name.clone();
+                    if let Some(d) = config_dir() {
+                        let _ = save_toml(&d.join("config.toml"), &c);
+                    }
+                    eng.planner
+                        .set_style(arrowhead_core::style::StylePlayer::new(
+                            next, &cfg.game, seed, 600,
+                        ));
+                }
             }
         }
         // Pause / focus / dry-run changes drive the session state.
@@ -671,6 +734,13 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
             );
         }
         was_dry = d;
+
+        for m in from_hud.try_iter() {
+            match m {
+                hud::FromHud::Offset(o) => eng.planner.cfg.offset_ms = f64::from(o),
+                hud::FromHud::Accuracy(a) => eng.planner.feed_accuracy(Some(f64::from(a))),
+            }
+        }
 
         let f = match src.next_frame(Duration::from_millis(200)) {
             Ok(Some(f)) => f,
@@ -739,6 +809,11 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
                 } => {
                     sum.presses += 1;
                     late_us.push((actual.ms_since(planned) * 1000.0) as f32);
+                    let _ = hud_tx.try_send(hud::ToHud::Press {
+                        sent: actual,
+                        lane,
+                        intended_ms: eng.planner.intended_err(id),
+                    });
                     emit(
                         &tx,
                         EngineEvent::Pressed {
@@ -790,12 +865,20 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
             last_head = Instant::now();
             if let Some(s) = session.on(SEv::HeadApproaching) {
                 state(&tx, s, "notes approaching");
+                if s == arrowhead_core::session::State::Playing {
+                    let _ = hud_tx.try_send(hud::ToHud::SongStart);
+                }
             }
         } else if last_head.elapsed() > Duration::from_secs(3)
             && let Some(s) = session.on(SEv::SongOver)
         {
             state(&tx, s, "no notes for 3 s");
-            // No history file in v0.1 (needs the HUD reader): straight back to waiting.
+            // The HUD thread writes the history row; the session goes straight back to waiting.
+            let _ = hud_tx.try_send(hud::ToHud::SongOver {
+                offset_ms: eng.planner.cfg.offset_ms as f32,
+                engine_missed: eng.planner.missed_by_engine,
+                watchdog: sum.watchdog,
+            });
             for ev in [SEv::HistoryWritten, SEv::LayoutReady] {
                 if let Some(s) = session.on(ev) {
                     state(&tx, s, "waiting for the next song");
@@ -851,6 +934,8 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
     }
     sched_stop.store(true, Ordering::SeqCst);
     let _ = sched.join();
+    drop(hud_tx);
+    let _ = hud_thread.join();
     sum.missed_by_engine = eng.planner.missed_by_engine;
     if let Some(e) = err {
         return Err(e.into());
