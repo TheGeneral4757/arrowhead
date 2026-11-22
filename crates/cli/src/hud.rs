@@ -65,8 +65,10 @@ pub fn run(
     atlas: Option<&Path>,
     save: bool,
     max_sad: f32,
+    playfield: Option<(i32, i32)>,
 ) -> Res {
     let mut rd = HudReader::new(atlas.map(Atlas::load).unwrap_or_default(), max_sad);
+    rd.playfield = playfield;
     for t in teaches {
         teach(&mut rd, dir, t)?;
     }
@@ -132,9 +134,18 @@ mod tests {
         for t in &teaches {
             teach(&mut rd, &dir, t).unwrap();
         }
-        // held out: game6 (-141.65 ms, scores -19543 / 63082), game1 (15 misses, no ms readout)
+        // These screenshots hold only the opponent's ms readout (under the small playfield on
+        // the right; our side has 0 hits). Spans are this screen's playfields, for the test only.
+        let (ours, theirs) = ((870, 1690), (1960, 2440));
+        // held out: game6 (opponent -141.65 ms, scores -19543 / 63082), game1 (15 misses)
         let fr = load_png(&dir.join("game6.png")).unwrap();
         let v = fr.view();
+        rd.playfield = Some(ours);
+        rd.locate(&v);
+        let read = rd.read(&v);
+        assert_eq!(read.ms, None, "the opponent's readout is not ours");
+        // The same font read where it is: the reader itself works on it.
+        rd.playfield = Some(theirs);
         rd.locate(&v);
         let read = rd.read(&v);
         assert_eq!(read.ms, Some(-141.65));

@@ -414,6 +414,9 @@ pub struct HudReader {
     /// Config `[detect] glyph_max_sad`.
     pub max_sad: f32,
     pub locs: Locations,
+    /// Our playfield's horizontal span (stream px, from the lane layout). Each player's ms
+    /// readout sits near their own playfield, so only lines centred inside it are ours.
+    pub playfield: Option<(i32, i32)>,
     seg: Segmenter,
 }
 
@@ -424,6 +427,20 @@ impl HudReader {
             max_sad: glyph_max_sad,
             ..Default::default()
         }
+    }
+
+    /// Our playfield span from the receptor centres and their spacing (`pitch`): one pitch
+    /// beyond the outer lanes on each side.
+    pub fn set_playfield(&mut self, receptor_x: [f32; 4], pitch: f32) {
+        let (lo, hi) = receptor_x
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(a, b), &x| (a.min(x), b.max(x)));
+        self.playfield = Some(((lo - pitch) as i32, (hi + pitch) as i32));
+    }
+
+    fn in_playfield(&self, r: &Rect) -> bool {
+        let c = r.x + r.w as i32 / 2;
+        self.playfield.is_some_and(|(a, b)| (a..=b).contains(&c))
     }
 
     /// Whole line as text, spaces dropped. `None` if any glyph is unknown or no text.
@@ -437,7 +454,8 @@ impl HudReader {
     /// that were kept, so later reads of that rect never see the decoration.
     fn read_text_trim(&mut self, f: &FrameView, r: Rect, face: Face) -> Option<(String, Rect)> {
         let row = self.seg.segment(f, r)?;
-        let m = classify_all(&self.atlas, &self.seg, face, &row.cells, self.max_sad)?;
+        let m = classify_all(&self.atlas, &self.seg, face, &row.cells, self.max_sad)
+            .filter(|m| !m.is_empty())?;
         let mut ds: Vec<f32> = m.iter().map(|g| g.d).collect();
         ds.sort_by(f32::total_cmp);
         let limit = (3.0 * ds[(ds.len() - 1) / 2] + 0.05).max(0.2);
@@ -605,7 +623,8 @@ impl HudReader {
 
     /// Finds every element on a full frame and remembers the regions.
     /// Stats and counts by stack structure (verified by label when taught); ms and
-    /// scores by reading the remaining lines with their faces.
+    /// scores by reading the remaining lines with their faces. The ms readout is only
+    /// looked for inside our playfield (`set_playfield`); the opponent's is ignored.
     pub fn locate(&mut self, f: &FrameView) -> Locations {
         let mut loc = Locations::default();
         let mut used: Vec<Rect> = vec![];
@@ -629,6 +648,7 @@ impl HudReader {
         for l in lines {
             let l = pad_line(f, l);
             if ms.is_none()
+                && self.in_playfield(&l)
                 && let Some(t) = self.read_text(f, l, Face::Ms)
                 && parse_ms(&t).is_some()
             {
@@ -714,6 +734,29 @@ impl HudReader {
             &["0.00%", "0", "0", "0", "0", "0.00ms", "0"],
         )?;
         self.teach_stack(f, Layout::Counts, &["0"; 5])
+    }
+
+    /// Live teaching of the ms font, which differs from the stats panel's. On the frame where
+    /// the stats panel's Hits first reads 1, its Mean MS is that hit's ms, so the readout in
+    /// our playfield shows the same text (unverified, spec 12 G14). Teaches it, then keeps the
+    /// new glyphs only if the readout then reads back as `mean_ms` there; else the atlas is
+    /// left as it was. A readout that contradicts a glyph already known fails that read: the
+    /// new glyph ties with the old one and the atlas rejects ties. Returns whether it was kept.
+    pub fn teach_ms_first_hit(&mut self, f: &FrameView, mean_ms: f32) -> bool {
+        let Some((a, b)) = self.playfield else {
+            return false;
+        };
+        let text = format!("{mean_ms:.2}ms");
+        let hint = Rect::new(a, f.region.y, (b - a).max(0) as u32, f.region.h);
+        let (atlas, locs) = (self.atlas.clone(), self.locs);
+        let ok = self.teach_lines(f, Face::Ms, &[&text], Some(hint)).is_ok()
+            && self.locate(f).ms.is_some()
+            && self.read(f).ms == Some(mean_ms);
+        if !ok {
+            self.atlas = atlas;
+            self.locs = locs;
+        }
+        ok
     }
 
     /// Teach stand-alone lines (ms readout, scores) from their text. Lines are the frame's

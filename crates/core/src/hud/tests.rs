@@ -143,12 +143,28 @@ fn stack(c: &mut Canvas, x: usize, y: usize, l: Layout, values: &[&str]) {
     }
 }
 
+/// Our playfield in the synthetic scene: our ms readout sits inside it, the opponent's not.
+const OURS: (i32, i32) = (400, 860);
+
 fn scene(stats: &[&str], counts: &[&str], ms: Option<&str>, scores: [&str; 2]) -> OwnedFrame {
+    scene_with(stats, counts, ms, None, scores)
+}
+
+fn scene_with(
+    stats: &[&str],
+    counts: &[&str],
+    ms: Option<&str>,
+    opponent_ms: Option<&str>,
+    scores: [&str; 2],
+) -> OwnedFrame {
     let mut c = Canvas::new(1280, 720);
     stack(&mut c, 20, 200, Layout::Stats, stats);
     stack(&mut c, 900, 200, Layout::Counts, counts);
     if let Some(ms) = ms {
         c.text(560, 400, ms, (255, 255, 80));
+    }
+    if let Some(ms) = opponent_ms {
+        c.text(900, 500, ms, (255, 255, 80));
     }
     c.text(30, 640, scores[0], (255, 255, 255));
     c.text(1000, 640, scores[1], (255, 255, 255));
@@ -166,6 +182,7 @@ const TEACH_COUNTS: [[&str; 5]; 2] = [
 
 fn taught() -> HudReader {
     let mut rd = HudReader::new(Atlas::default(), 0.25);
+    rd.playfield = Some(OURS);
     // two teaching frames cover every digit in every face
     let a = scene(
         &TEACH_STATS[0],
@@ -185,9 +202,10 @@ fn taught() -> HudReader {
         rd.teach_stack(&v, Layout::Counts, &TEACH_COUNTS[i])
             .unwrap();
     }
-    rd.teach_lines(&a.view(), Face::Ms, &["-1234.56ms"], None)
+    let ours = Some(Rect::new(OURS.0, 0, (OURS.1 - OURS.0) as u32, 720));
+    rd.teach_lines(&a.view(), Face::Ms, &["-1234.56ms"], ours)
         .unwrap();
-    rd.teach_lines(&b.view(), Face::Ms, &["-90.78ms"], None)
+    rd.teach_lines(&b.view(), Face::Ms, &["-90.78ms"], ours)
         .unwrap();
     rd.teach_lines(&a.view(), Face::Score, &["-1234567", "8909"], None)
         .unwrap();
@@ -217,11 +235,13 @@ fn parsers() {
 #[test]
 fn locate_and_read_synthetic_hud() {
     let mut rd = taught();
-    // a different frame: new numbers, all from taught digits
-    let f = scene(
+    // a different frame: new numbers, all from taught digits; the opponent's readout is
+    // further right, outside our playfield, and must not be taken for ours
+    let f = scene_with(
         &["98.76%", "4321", "0987", "5612", "3490", "87.65ms", "21"],
         &["10", "20", "30", "40", "5"],
         Some("-43.21ms"),
+        Some("-12.34ms"),
         ["-9876", "5432"],
     );
     let v = f.view();
@@ -266,6 +286,48 @@ fn locate_and_read_synthetic_hud() {
     );
     let r2 = rd.read(&f2.view());
     assert!(r2.ms.is_none() && r2.ms_blank);
+
+    // only the opponent's readout on screen (we have not hit yet): no ms region at all
+    let mut rd = taught();
+    let f3 = scene_with(
+        &["98.76%", "4321", "0987", "5612", "3490", "87.65ms", "21"],
+        &["10", "20", "30", "40", "5"],
+        None,
+        Some("-12.34ms"),
+        ["-9876", "5432"],
+    );
+    assert_eq!(rd.locate(&f3.view()).ms, None);
+}
+
+#[test]
+fn ms_font_taught_from_the_first_hit() {
+    // Stats taught, ms font not: the frame where Hits first reads 1 teaches it from Mean MS.
+    let mut rd = HudReader::new(Atlas::default(), 0.25);
+    rd.playfield = Some(OURS);
+    let a = scene(&TEACH_STATS[0], &TEACH_COUNTS[0], None, ["0", "0"]);
+    rd.teach_stack(&a.view(), Layout::Stats, &TEACH_STATS[0])
+        .unwrap();
+    let first = scene_with(
+        &["0.00%", "1", "1", "1", "0", "-12.34ms", "1"],
+        &["1", "0", "0", "0", "0"],
+        Some("-12.34ms"),
+        Some("-56.78ms"),
+        ["350", "0"],
+    );
+    assert!(rd.teach_ms_first_hit(&first.view(), -12.34));
+    assert_eq!(rd.read(&first.view()).ms, Some(-12.34));
+    // a readout made of known glyphs that says something else than Mean MS: nothing is kept
+    let mut rd2 = HudReader::new(rd.atlas.clone(), 0.25);
+    rd2.playfield = Some(OURS);
+    let before = rd2.atlas.to_bytes();
+    let wrong = scene(
+        &TEACH_STATS[1],
+        &TEACH_COUNTS[1],
+        Some("-21.43ms"),
+        ["0", "0"],
+    );
+    assert!(!rd2.teach_ms_first_hit(&wrong.view(), -12.34));
+    assert_eq!(rd2.atlas.to_bytes(), before);
 }
 
 #[test]

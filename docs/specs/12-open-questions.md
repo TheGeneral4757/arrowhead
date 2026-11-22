@@ -25,6 +25,7 @@ The reference images in `docs/research/ff-refs/` are rough examples, not evidenc
 | G11 | Results screen: is there a stable element to detect? | receptors gone 1.5 s | Record the end of a song | Yes: "Stats from last song" panel (accuracy, mean ms, combos, counts, total notes, final score) |
 | G12 | Do receptors light up on press (side detection relies on it)? | assumed yes | Record presses | Yes: grey receptors light up in the lane colour on press |
 | G13 | Upscroll default or downscroll default? | detected | Settings | User plays upscroll only. Keep detection; downscroll stays supported but untested |
+| G14 | In a song, does Mean MS on the stats panel equal the ms readout after the first hit (same value and sign)? | assumed yes (the ms font is taught from it) | Hit one note, compare the two | |
 
 ## Platform
 | # | Question | Default | How | Answer |
