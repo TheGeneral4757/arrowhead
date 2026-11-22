@@ -30,8 +30,7 @@
           "path": "ui/package-lock.json",
           "jsonpath": "$.packages[''].version"
         }
-      ],
-      "release-as": "0.1.0"
+      ]
     }
   }
 }
