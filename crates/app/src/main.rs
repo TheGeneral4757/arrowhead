@@ -209,12 +209,13 @@ fn start_engine(
     let (tx, rx) = mpsc::sync_channel::<EngineEvent>(4096);
     let (live, logs) = (state.live.clone(), state.logs.clone());
     let cfg = load_config().unwrap_or_default();
-    let monitor = load_profile().map(|p| p.monitor).unwrap_or_default();
+    let prof = load_profile().unwrap_or_default();
     let (overlay, overlay_err) = overlay::Overlay::start(
         &app,
         cfg.ui.overlay,
         cfg.ui.minimise_while_playing,
-        &monitor,
+        &prof.monitor,
+        prof.stream_size,
     );
     if let Some(e) = overlay_err {
         logs.write(Level::Warn, &format!("overlay not started: {e}"));

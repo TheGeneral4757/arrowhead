@@ -1,8 +1,9 @@
 //! Click-through overlay process (v0.2, spec 07). The app writes one JSON array of `EngineEvent`s
 //! per line on stdin; the overlay draws them over the game and exits when stdin closes.
 //!
-//! `arrowhead-overlay [--output NAME]`: NAME is the output (Wayland connector, e.g. DP-2, or a
-//! Windows display name) the game runs on; the first output when missing or unknown.
+//! `arrowhead-overlay [--output NAME] [--size WxH]`: NAME is the output (Wayland connector, e.g.
+//! DP-2, or a Windows display name) the game runs on. Without a match, the first output whose
+//! current mode is WxH (the captured stream size) is used, else the first output.
 
 mod model;
 mod render;
@@ -29,12 +30,19 @@ pub fn read_stdin(mut send: impl FnMut(Vec<Msg>) -> bool) {
 fn main() {
     let mut args = std::env::args().skip(1);
     let mut output = None;
+    let mut size = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--output" => output = args.next(),
+            "--size" => {
+                size = args.next().and_then(|v| {
+                    let (w, h) = v.split_once('x')?;
+                    Some((w.parse::<i32>().ok()?, h.parse::<i32>().ok()?))
+                })
+            }
             "-h" | "--help" => {
                 eprintln!(
-                    "usage: arrowhead-overlay [--output NAME]  (JSON event batches on stdin)"
+                    "usage: arrowhead-overlay [--output NAME] [--size WxH]  (JSON event batches on stdin)"
                 );
                 return;
             }
@@ -45,12 +53,12 @@ fn main() {
         }
     }
     #[cfg(target_os = "linux")]
-    let res = wayland::run(output);
+    let res = wayland::run(output, size);
     #[cfg(windows)]
-    let res = win::run(output);
+    let res = win::run(output, size);
     #[cfg(not(any(target_os = "linux", windows)))]
     let res: Result<(), String> = {
-        let _ = output;
+        let _ = (output, size);
         Err("no overlay backend on this OS".into())
     };
     if let Err(e) = res {

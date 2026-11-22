@@ -179,7 +179,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     }
 }
 
-pub fn run(output: Option<String>) -> Result<(), String> {
+pub fn run(output: Option<String>, size: Option<(i32, i32)>) -> Result<(), String> {
     unsafe {
         // Physical pixels, like the captured stream.
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -193,6 +193,11 @@ pub fn run(output: Option<String>) -> Result<(), String> {
         let mon = output
             .as_deref()
             .and_then(|n| mons.iter().position(|m| m.name.contains(n)))
+            .or_else(|| {
+                let (sw, sh) = size?;
+                mons.iter()
+                    .position(|m| (m.rect.right - m.rect.left, m.rect.bottom - m.rect.top) == (sw, sh))
+            })
             .or((!mons.is_empty()).then_some(0))
             .map(|i| mons.swap_remove(i))
             .ok_or("no monitors")?;
@@ -257,7 +262,9 @@ pub fn run(output: Option<String>) -> Result<(), String> {
             draw: Draw::default(),
             dirty: true,
             last: Instant::now() - Duration::from_secs(1),
-            min_gap: Duration::from_micros(1_000_000 / u64::from(refresh_hz(&mon.name))),
+            // Monitor refresh, capped at 30 Hz: each redraw copies a full-monitor buffer.
+            min_gap: Duration::from_micros(1_000_000 / u64::from(refresh_hz(&mon.name)))
+                .max(Duration::from_millis(33)),
             inbox: inbox.clone(),
         }));
         WIN.with_borrow_mut(|w| w.as_mut().unwrap().redraw());

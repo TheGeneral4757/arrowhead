@@ -1,7 +1,11 @@
 //! Wayland backend: a wlr layer-shell surface on the `overlay` layer, anchored to every edge of
 //! one output, no keyboard focus and an empty input region (clicks pass through), drawn into an
 //! shm buffer. It redraws only when the state changed, at most once per frame callback (so never
-//! faster than the monitor refreshes).
+//! faster than the monitor refreshes, and at most every `MIN_GAP`: a full-output buffer is
+//! re-rendered and copied each time, which must not take CPU from the game).
+
+use std::time::{Duration, Instant};
+
 
 use smithay_client_toolkit::compositor::{CompositorHandler, CompositorState, Region};
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
@@ -28,6 +32,9 @@ use tiny_skia::Pixmap;
 use crate::model::{Draw, Msg};
 use crate::render::{render, to_bgra};
 
+/// 30 Hz, the UI's event rate.
+const MIN_GAP: Duration = Duration::from_millis(33);
+
 struct App {
     registry_state: RegistryState,
     output_state: OutputState,
@@ -43,12 +50,17 @@ struct App {
     configured: bool,
     dirty: bool,
     frame_pending: bool,
+    last: Option<Instant>,
     exit: bool,
 }
 
 impl App {
     fn redraw(&mut self, qh: &QueueHandle<Self>) {
-        if !self.configured || !self.dirty || self.frame_pending {
+        if !self.configured
+            || !self.dirty
+            || self.frame_pending
+            || self.last.is_some_and(|t| t.elapsed() < MIN_GAP)
+        {
             return;
         }
         let Some(layer) = &self.layer else { return };
@@ -81,6 +93,7 @@ impl App {
             layer.commit();
             self.frame_pending = true;
             self.dirty = false;
+            self.last = Some(Instant::now());
         }
     }
 }
@@ -183,7 +196,7 @@ delegate_shm!(App);
 delegate_layer!(App);
 delegate_registry!(App);
 
-pub fn run(output: Option<String>) -> Result<(), String> {
+pub fn run(output: Option<String>, size: Option<(i32, i32)>) -> Result<(), String> {
     let conn = Connection::connect_to_env().map_err(|e| format!("no Wayland display: {e}"))?;
     let (globals, queue) = registry_queue_init::<App>(&conn).map_err(|e| e.to_string())?;
     let qh = queue.handle();
@@ -207,6 +220,7 @@ pub fn run(output: Option<String>) -> Result<(), String> {
         configured: false,
         dirty: false,
         frame_pending: false,
+        last: None,
         exit: false,
     };
 
@@ -226,6 +240,15 @@ pub fn run(output: Option<String>) -> Result<(), String> {
             outputs
                 .iter()
                 .find(|(i, _)| i.as_ref().and_then(|i| i.name.as_deref()) == Some(n))
+        })
+        .or_else(|| {
+            // The portal does not name the output; the stream size is the next best match.
+            size.and_then(|sz| {
+                outputs.iter().find(|(i, _)| {
+                    i.as_ref()
+                        .is_some_and(|i| i.modes.iter().any(|m| m.current && m.dimensions == sz))
+                })
+            })
         })
         .or_else(|| outputs.first());
     if let Some((info, _)) = chosen {
@@ -272,7 +295,8 @@ pub fn run(output: Option<String>) -> Result<(), String> {
 
     let signal = event_loop.get_signal();
     event_loop
-        .run(None, &mut app, |app| {
+        // Wakes at the redraw cap so a redraw held back by it is not left waiting for an event.
+        .run(Some(MIN_GAP), &mut app, |app| {
             app.redraw(&qh);
             if app.exit {
                 signal.stop();

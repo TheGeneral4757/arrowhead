@@ -44,11 +44,14 @@ fn wanted(mode: AutoOnOff, monitors: usize) -> bool {
     }
 }
 
-fn spawn(output: &str) -> Result<SyncSender<String>, String> {
+fn spawn(output: &str, size: [u32; 2]) -> Result<SyncSender<String>, String> {
     let exe = binary().ok_or("arrowhead-overlay not found next to the app")?;
     let mut cmd = Command::new(exe);
     if !output.is_empty() {
         cmd.args(["--output", output]);
+    }
+    if size[0] > 0 {
+        cmd.args(["--size", &format!("{}x{}", size[0], size[1])]);
     }
     let mut child = cmd
         .stdin(Stdio::piped())
@@ -77,17 +80,18 @@ fn spawn(output: &str) -> Result<SyncSender<String>, String> {
 }
 
 impl Overlay {
-    /// `output` is the game's monitor name (the profile's). Returns the overlay and, when it
-    /// could not start, why (for the log).
+    /// `output` and `size` are the profile's monitor name and stream size, which pick the
+    /// overlay's output. Returns the overlay and, when it could not start, why (for the log).
     pub fn start(
         app: &AppHandle,
         overlay: AutoOnOff,
         minimise: AutoOnOff,
         output: &str,
+        size: [u32; 2],
     ) -> (Self, Option<String>) {
         let monitors = app.available_monitors().map_or(1, |m| m.len());
         let (tx, err) = if wanted(overlay, monitors) {
-            match spawn(output) {
+            match spawn(output, size) {
                 Ok(tx) => (Some(tx), None),
                 Err(e) => (None, Some(e)),
             }
