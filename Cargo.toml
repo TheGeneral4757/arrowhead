@@ -34,6 +34,7 @@ clap = { version = "4.6", features = ["derive"] }
 png = "0.18"
 evdev = "0.13"
 zbus = { version = "6.5", default-features = false, features = ["tokio", "service"] }
+rand_chacha = "0.9"
 
 # Detection and the synthetic frame tests are pixel loops; debug builds are too slow for them.
 [profile.dev.package.arrowhead-core]
