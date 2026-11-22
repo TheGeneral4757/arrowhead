@@ -8,7 +8,7 @@ use crate::time::Nanos;
 
 pub mod calib;
 #[cfg(test)]
-mod synth_tests;
+pub(crate) mod synth_tests;
 
 /// Opponent colour space `(C1, C2, Y)`: `C1 = r - b`, `C2 = g - (r + b) / 2`, `Y = (r + 2g + b) / 4`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -58,7 +58,7 @@ impl Default for DetectConfig {
         Self {
             strip_width_frac: 0.35,
             approach_len_frac: 0.70,
-            head_fill: 0.5,
+            head_fill: 0.4,
             trail_fill: 0.4,
             head_tol_min: 12,
             head_tol_max: 60,
@@ -168,6 +168,8 @@ pub enum ObsKind {
     TrailStart,
     /// Far end of a trail.
     TrailEnd,
+    /// The trail runs off the far end of the strip: a hold whose end is not visible yet.
+    TrailCut,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -180,11 +182,11 @@ pub struct NoteObs {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Run {
-    a: i32,
-    b: i32,
-    w: f32,
-    wy: f32,
+pub(crate) struct Run {
+    pub(crate) a: i32,
+    pub(crate) b: i32,
+    pub(crate) w: f32,
+    pub(crate) wy: f32,
 }
 
 /// Contiguous rows with `fill[i] >= thr`; rows are stream y `y0 + i`.
@@ -351,6 +353,9 @@ impl Detector {
             };
 
             let (top, bottom) = (lane.strip.y, lane.strip.y + lane.strip.h as i32 - 1);
+            // Runs are in y order; `prev_far` is the far end (approach side) of the previous run
+            // nearer the receptor, so a run starting right behind it is a note partly covered
+            // by that one (the near note's outline cuts across it).
             for h in &self.heads {
                 let len = (h.b - h.a + 1) as f32;
                 if len < 0.4 * hl {
@@ -369,6 +374,8 @@ impl Detector {
                     }
                 } else if len > 1.2 * hl {
                     // Overlapping heads (jacks at low speed): only the two ends are exposed.
+                    // shortcut: middle notes of 3+ overlapping heads are seen only once the
+                    // notes in front are hit; splitting on note outlines needs real footage.
                     push(from_a, ObsKind::Head);
                     push(from_b, ObsKind::Head);
                 } else {
@@ -394,7 +401,19 @@ impl Detector {
                         push(near as f32, ObsKind::TrailStart);
                     }
                 }
-                push(far as f32, ObsKind::TrailEnd);
+                let cut = if approach > 0 {
+                    far >= bottom
+                } else {
+                    far <= top
+                };
+                push(
+                    far as f32,
+                    if cut {
+                        ObsKind::TrailCut
+                    } else {
+                        ObsKind::TrailEnd
+                    },
+                );
             }
         }
     }

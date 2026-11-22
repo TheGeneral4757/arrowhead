@@ -9,12 +9,14 @@ use crate::config::{Scroll, Side};
 use crate::frame::OwnedFrame;
 use crate::testkit::*;
 
-struct Calibrated {
-    layout: Layout,
-    det: Detector,
+pub(crate) struct Calibrated {
+    pub layout: Layout,
+    pub det: Detector,
 }
 
-fn calibrate(s: &Scene, chart: &[Note], rng: &mut Rng) -> Calibrated {
+/// Calibrates on a synthetic scene exactly as the app would: snapshots, receptor finder,
+/// colour learning. Asserts the layout is within 1 px of the truth.
+pub(crate) fn calibrate(s: &Scene, chart: &[Note], rng: &mut Rng) -> Calibrated {
     let full = Rect::new(0, 0, s.w, s.h);
     let snaps: Vec<OwnedFrame> = (0..9)
         .map(|i| s.render(chart, i as f64 * 250.0, full, None))
@@ -46,10 +48,13 @@ fn calibrate(s: &Scene, chart: &[Note], rng: &mut Rng) -> Calibrated {
         .collect();
     let bgv: Vec<_> = bg.iter().map(|f| f.view()).collect();
     let mut learner = ColourLearner::new(layout.clone(), cfg.clone(), &bgv);
+    // The whole 20 s window at up to 60 frames a second, as `cli detect` learns over a fixed
+    // window: stopping early can end before the first hold.
+    let mut next = 0.0;
     for (t, _) in s.frames(rng, 0.0, 20_000.0) {
-        learner.feed(&s.render(chart, t, region, Some(&strips)).view());
-        if learner.counts().iter().all(|&c| c >= 40) && learner.trail_runs() >= 20 {
-            break;
+        if t >= next {
+            next = t + 1000.0 / 60.0 - 0.5;
+            learner.feed(&s.render(chart, t, region, Some(&strips)).view());
         }
     }
     let pres = Presence::new(&layout, &bgv, &cfg);

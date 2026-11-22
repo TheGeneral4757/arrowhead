@@ -5,7 +5,7 @@ Guidance for Claude Code in this repo.
 ## Project
 arrowhead: screen-reading Funky Friday (Roblox) autoplayer, 4-key ("4K") mode only, for private servers. Dev setup: game on a 2560x1440 165 Hz monitor (DP-2). Rust Cargo workspace + Tauri 2 app with a React/TS front end. Linux first (KDE Plasma 6 test target, Hyprland daily), Windows in v0.2. Successor to `~/GitHub/fnf-thing-v2` (reference code for the PipeWire, uinput, DXGI and SendInput backends).
 
-**Status:** M0 game facts mostly answered (see `12-open-questions.md`); M1 and M2 merged; M3 (detection and calibration) on branch `m3`. Next is M4 (timing, input, safety). See `docs/specs/11-roadmap.md`.
+**Status:** M0-M3 merged. M4 (timing, input, safety) on branch `m4`: tracker, planner, scheduler, uinput sink, KWin focus probe and `cli run` built and tested on synthetic replays; waiting on a dry run and a live run with the game. See `docs/specs/04-timing.md` (M4 status) and `11-roadmap.md`.
 
 ## Where things are
 | Need | Read |
@@ -36,7 +36,9 @@ arrowhead: screen-reading Funky Friday (Roblox) autoplayer, 4-key ("4K") mode on
 | Dev app | `npm --prefix ui run tauri dev` |
 | Release app | `npm --prefix ui run tauri build` (never `cargo build --release -p arrowhead-app` alone: it skips the UI build) |
 | CLI | `cargo run -p arrowhead-cli -- <capture|record|replay|import|detect|run|bench|diag>` |
-| Detect on a clip | `cargo run --release -p arrowhead-cli -- detect clip.ahclip -q --debug-png out/ --every 60` |
+| Detect on a clip | `cargo run --release -p arrowhead-cli -- detect clip.ahclip -q --plan --debug-png out/ --every 60` |
+| Play (dry run, no keys) | `cargo run --release -p arrowhead-cli -- run --seconds 60` (add `--live` to send keys) |
+| Focus probe / scheduler bench | `cargo run --release -p arrowhead-cli -- focus` / `-- bench` |
 | Clip from a recording | `cargo run -p arrowhead-cli -- import ~/ah-clips/song-01.mkv -o tests/clips/x.ahclip --region x,y,w,h --start 300 --seconds 5` |
 
 Clips in `tests/clips/` are git LFS: `git lfs pull` first.

@@ -11,7 +11,9 @@ use arrowhead_core::detect::calib::{
     ColourLearner, find_blobs, find_groups, guess_scroll, layout_for, pick_ours,
 };
 use arrowhead_core::detect::{DetectConfig, Detector, Layout, NoteObs, ObsKind};
+use arrowhead_core::engine::Engine;
 use arrowhead_core::frame::{FrameView, OwnedFrame};
+use arrowhead_core::plan::{Cmd, PlanConfig};
 
 use crate::{Res, pct};
 
@@ -21,6 +23,8 @@ pub struct Opts<'a> {
     pub debug_png: Option<&'a Path>,
     pub every: usize,
     pub quiet: bool,
+    /// Also run tracker + planner (dry, no keys) and report what would be pressed.
+    pub plan: bool,
 }
 
 fn spread(reader: &mut ClipReader, n: usize, upto: usize) -> std::io::Result<Vec<OwnedFrame>> {
@@ -52,7 +56,18 @@ pub fn run(o: Opts) -> Res {
     if n < 2 {
         return Err("clip has fewer than 2 frames".into());
     }
-    let upto = ((o.learn_s * h.refresh_hz) as usize).clamp(2, n);
+    // Learning window by recorded time, not nominal rate (frames may be dropped).
+    let t0 = reader.read(0)?.pts;
+    let (mut lo, mut hi) = (1, n);
+    while lo < hi {
+        let mid = (lo + hi) / 2;
+        if reader.read(mid)?.pts.ms_since(t0) < o.learn_s as f64 * 1000.0 {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    let upto = lo.clamp(2, n);
     let cfg = DetectConfig::default();
 
     let snaps = spread(&mut reader, 9, upto)?;
@@ -102,10 +117,16 @@ pub fn run(o: Opts) -> Res {
         region.x, region.y, region.w, region.h
     );
 
-    let mut det = Detector::new(layout.clone(), cfg, colours);
+    let mut det = Detector::new(layout.clone(), cfg.clone(), colours.clone());
+    let mut planner_det = Detector::new(layout.clone(), cfg, colours);
     for (l, bg) in learner.bg.iter().enumerate() {
         det.set_background(l, bg);
+        planner_det.set_background(l, bg);
     }
+    let mut eng = o
+        .plan
+        .then(|| Engine::new(planner_det, PlanConfig::default()));
+    let (mut cmds, mut presses, mut holds) = (Vec::new(), [0u32; 4], 0u32);
     let mut buf = Vec::new();
     let mut obs: Vec<NoteObs> = Vec::with_capacity(64);
     let mut prev: Vec<NoteObs> = Vec::with_capacity(64);
@@ -124,6 +145,25 @@ pub fn run(o: Opts) -> Res {
         };
         let t0 = Instant::now();
         det.detect(&f, &mut obs);
+        if let Some(eng) = eng.as_mut() {
+            cmds.clear();
+            // As if the frame reached us 3 ms after it was shown.
+            eng.on_frame(&f, pts.add_ms(3.0), &mut cmds);
+            for c in &cmds {
+                if let Cmd::Press {
+                    lane, at, release, ..
+                } = *c
+                {
+                    presses[lane as usize] += 1;
+                    if release.ms_since(at) > 60.0 {
+                        holds += 1;
+                    }
+                    if !o.quiet {
+                        writeln!(out, "press lane {lane} at {:.1} ms", at.ms())?;
+                    }
+                }
+            }
+        }
         times.push(t0.elapsed().as_secs_f64() * 1e6);
         // Scroll vote: heads move toward smaller y in upscroll.
         for o in obs.iter().filter(|o| o.kind == ObsKind::Head) {
@@ -146,6 +186,7 @@ pub fn run(o: Opts) -> Res {
                     ObsKind::Head => 'H',
                     ObsKind::TrailStart => 'S',
                     ObsKind::TrailEnd => 'E',
+                    ObsKind::TrailCut => 'C',
                 };
                 write!(out, " {}{k}{:.1}", o.lane, o.y)?;
             }
@@ -160,6 +201,15 @@ pub fn run(o: Opts) -> Res {
     }
     out.flush()?;
     println!("frames    {n}, head obs {heads}, trail obs {trails}");
+    if let Some(eng) = &eng {
+        println!(
+            "plan      presses per lane {presses:?} ({} total, {holds} planned as holds), missed by engine {}, scroll {:.3} px/ms, speed changes {}",
+            presses.iter().sum::<u32>(),
+            eng.planner.missed_by_engine,
+            eng.tracker.velocity().unwrap_or(0.0).abs(),
+            eng.tracker.scroll_changes
+        );
+    }
     println!(
         "motion    {} up / {} down (heads moving {:?})",
         votes[0],
@@ -213,7 +263,7 @@ fn debug_png(path: &Path, f: &FrameView, det: &Detector, obs: &[NoteObs]) -> Res
         let c = match o.kind {
             ObsKind::Head => [255, 0, 255],
             ObsKind::TrailEnd => [255, 255, 255],
-            ObsKind::TrailStart => [128, 128, 128],
+            ObsKind::TrailStart | ObsKind::TrailCut => [128, 128, 128],
         };
         for x in s.x - 12..s.x + s.w as i32 + 12 {
             put(x, o.y.round() as i32, c);
@@ -223,6 +273,8 @@ fn debug_png(path: &Path, f: &FrameView, det: &Detector, obs: &[NoteObs]) -> Res
     let mut enc = png::Encoder::new(BufWriter::new(File::create(path)?), w as u32, h as u32);
     enc.set_color(png::ColorType::Rgb);
     enc.set_depth(png::BitDepth::Eight);
-    enc.write_header()?.write_image_data(&rgb)?;
+    let mut w = enc.write_header()?;
+    w.write_image_data(&rgb)?;
+    w.finish()?;
     Ok(())
 }

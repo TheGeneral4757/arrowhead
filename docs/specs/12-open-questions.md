@@ -33,7 +33,7 @@ The reference images in `docs/research/ff-refs/` are rough examples, not evidenc
 | P2 | PipeWire pts and SHM copy time at full refresh | measure | `cli capture` (M2) | KDE: pts present, age p50 2.0 / p99 7.0 ms; 165 Hz intervals while the screen changes (damage-driven, so a still screen sends almost nothing). During a song: 164.8 fps, interval p50/p99 6.06/6.06 ms, pts age p50 2.8 / p99 4.8 ms, copy 291/370 us (p50/p99) for 840x900, 0 drops |
 | P3 | Does Sober receive uinput keys reliably (issues #1959, #1940)? | yes per v2 | Key test in Setup | |
 | P4 | Layer-shell overlay above fullscreen Sober on KWin and Hyprland | unknown | Spike | |
-| P5 | KWin script focus probe sees Sober's class | unknown | Spike | |
+| P5 | KWin script focus probe sees Sober's class | unknown | Spike | Probe works on Plasma 6 (`cli focus`: active window class reported in 0.1 s, script unloaded after). Sober's class not checked yet |
 | P6 | GlobalShortcuts portal works on this KDE and Hyprland setup | unknown | Spike | |
 | P7 | Windows: does Roblox's anti-cheat block SendInput or capture? | unknown | v0.2 test on a spare account | |
 | P8 | Portal window-source restore across Sober restarts | unknown, monitor default | Spike | |

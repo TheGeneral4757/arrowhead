@@ -7,3 +7,9 @@ license-file.workspace = true
 
 [dependencies]
 arrowhead-core.workspace = true
+serde.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev.workspace = true
+zbus.workspace = true
+tokio.workspace = true

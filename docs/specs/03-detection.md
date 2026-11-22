@@ -39,18 +39,19 @@ Each pixel gets one of `Bg`, `Head(lane)`, `Trail`, `Other`.
 - `Head(lane)`: distance to the lane's learned head colour (C1, C2, Y) under `head_tol` (adaptive, see below).
 - `Trail`: distance to the learned trail colour under `trail_tol`.
 - `Bg`: luma within `bg_tol` of the background model: one luma per strip pixel, seeded from the calibration median, updated (alpha 1/8, every 4th frame) only on pixels not classed `Head` or `Trail`.
+- `Trail` = learned trail colour within `trail_tol` and not background (luma more than `bg_tol` off the background model). The learner only accepts a trail colour that stands clear of the median background, so this second test only removes background art of the trail's colour.
 - Trails need a learned trail colour; until then no trail is reported (a grey rule would match a black background whenever the background model is off).
 - Everything else `Other` (receptor glow, splashes, UI).
 
 ### 3. Row profile
-For each strip row, `fill = matching_pixels / w` per class. A row is "head" if `fill_head >= 0.5`, "trail" if `fill_trail >= 0.4`. 1D, so 900 rows x 4 lanes per frame.
+For each strip row, `fill = matching_pixels / w` per class. A row is "head" if `fill_head >= 0.4`, "trail" if `fill_trail >= 0.4`. (0.5 made sideways arrows bimodal on the user's skin: the triangle's slanted edges sit right at half the strip width, giving runs of 80 or 118 px. At 0.4 every lane gives one length.) 1D, so 900 rows x 4 lanes per frame.
 
 ### 4. Runs to observations
 - Contiguous head rows form a run. `head_len` is the learned run length of one head in that lane (sideways arrows give shorter runs than up/down ones). Runs shorter than `0.4 * head_len` are noise.
 - Runs longer than `1.2 * head_len` are overlapping heads (jacks at low speed): only the two exposed ends are reported, one head from each end. Middle notes appear as the front ones are hit.
 - A run cut by the far end of the strip reports one head from its near end if at least `0.9 * head_len` is visible, else nothing.
 - Head `y` = sprite centre: fill-weighted centroid of the run minus the receptor's centroid offset (`run_shape`, scaled by `head_len / run_len`). Arrows are not symmetric along the strip, so the raw centroid is not the centre.
-- A trail run adjacent to a head (on the far side from the receptor) marks a hold. Its far end is `TrailEnd`. A trail run with no head that touches the receptor zone is a hold in progress: `TrailStart` (near end) and `TrailEnd`. Other trail runs report `TrailEnd` only; the tracker decides.
+- A trail run adjacent to a head (on the far side from the receptor) marks a hold. Its far end is `TrailEnd`. A trail run with no head that touches the receptor zone is a hold in progress: `TrailStart` (near end) and `TrailEnd`. Other trail runs report `TrailEnd` only; the tracker decides. A trail that runs off the far end of the strip reports `TrailCut` instead of `TrailEnd` (its end is not visible yet): the planner keeps such a hold down until the end shows up.
 - Notes inside the receptor zone (within one radius of the receptor centre) are still reported. A pressed receptor lights up in the lane colour, so it is also reported as a stationary head at the receptor; the tracker ignores heads that do not move. Trails are not classified inside the zone (the idle receptor is grey too).
 
 ## Calibration
@@ -76,8 +77,9 @@ Until decided, plan presses for neither side; `Armed` waits. In dry run, use the
 ### Colour learning
 - Background for learning: per-pixel median luma of ~20 frames spread over the whole learning window (10-20 s). A shorter spread lets one long hold's trail become background.
 - Foreground while learning: "saturated or bright, not background" (`|C1| + |C2| > learn_chroma` or luma differs from the background by more than `bg_tol`).
-- Heads: foreground runs 0.3-1.6x the receptor size, not cut by the strip ends and clear of the receptor zone. Per lane: median colour of the runs' medians, `head_tol` = 95th percentile pixel distance (clamped to config min/max), `head_len` = median run length of the inliers. Needs 6 runs per lane (each frame a note is visible counts).
-- Trail colour: from foreground runs at least 1.8x the receptor size, pixels not matching any head. Needs 3 such runs and 200 pixels, and must stand clear of the median background (else no trail colour). Shared by all lanes. On the user's skin it learns exactly (85, 85, 85).
+- Heads: foreground runs at the detector's `head_fill`, 0.3-1.6x the receptor size, not cut by the strip ends, clear of the receptor zone and not inside a long (hold) run. A grey run whose luma is within `2 * bg_tol` of the background is animated background and is skipped. Per lane: the head colour is the median of the densest cluster of run colours (trail pieces, glow or background can make a sizeable minority, and a per-channel median of a mixture is no colour at all); `head_tol` = 95th percentile pixel distance of the cluster (clamped); `head_len` = most common run length (+/- 3 px), not the median, which merged jacks drag up. Needs 6 runs per lane (each frame a note is visible counts).
+- Trail colour: from foreground runs (at `trail_fill`, so a trail is one run) at least 1.8x the receptor size; only rows whose middle half of the strip is mostly pixels clearly off the background (`2 * bg_tol` or saturated), and only those middle-half pixels (popups and neighbours reach the strip edges, a trail always fills the middle). Pixels matching any head are dropped; colour = median of the densest cluster. Needs 3 such runs and 200 pixels, and must stand clear of the median background (else no trail colour). Shared by all lanes. On the user's skin it learns exactly (85, 85, 85).
+- Learning runs over a fixed window (the CLI: `--learn`, by recorded time). Stopping as soon as some counts are reached can end before the first hold.
 - If learning fails with the guessed scroll direction, retry the other way (`cli detect` does this).
 - Store learned colours in the profile. Re-learn when a song starts and the stored colours match under 50% of moving blobs (skin change).
 
@@ -123,7 +125,7 @@ Per frame on the scan thread at 240 Hz (4.2 ms period): classify + profile + run
 Measured (M3, dev machine, release, `cli detect` on a 12 s clip of the user's game): strips are 78 x ~1100 px x 4 = 343k pixels at 2560x1440, p50 0.94 ms, p99 1.12 ms. That is inside the 6 ms period at 165 Hz, so row-skip is not done yet; do it before targeting 240 Hz.
 
 ## Configuration (profile `[detect]`)
-`strip_width_frac = 0.35`, `approach_len_frac = 0.70`, `head_fill = 0.5`, `trail_fill = 0.4`, `head_tol_min/max = 12/60`, `trail_tol_min/max = 12/40`, `bg_tol = 18`, `learn_chroma = 40`, `receptor_ncc_min = 0.6`, `glyph_max_sad` (HUD, later).
+`strip_width_frac = 0.35`, `approach_len_frac = 0.70`, `head_fill = 0.4`, `trail_fill = 0.4`, `head_tol_min/max = 12/60`, `trail_tol_min/max = 12/40`, `bg_tol = 18`, `learn_chroma = 40`, `receptor_ncc_min = 0.6`, `glyph_max_sad` (HUD, later).
 
 ## Acceptance (M3)
 - `arrowhead-cli detect <clip>` prints layout, side, scroll and a per-frame list of observations; an annotated PNG per N frames with `--debug-png`.
@@ -134,3 +136,10 @@ Measured (M3, dev machine, release, `cli detect` on a 12 s clip of the user's ga
 > - Synthetic (`core/src/detect/synth_tests.rs`): calibration within 1 px at 1280x720, 1920x1080 and 2560x1440, both directions. Detection over 10,073 notes (8 suites: up/down x 0.4, 1, 2, 3 px/ms at 60 fps, random shapes, colours and backgrounds, glow, popup, 1 ms jitter, 2% drops): 0 missed heads, 0 false heads, 0 missed trail ends, every note seen in 3+ frames. "Missed" counts heads fully inside the strip that are exposed (not covered on both sides by other heads) and not in a lit receptor; a head or trail end matches within 2 px.
 > - User's game (`song-01.mkv`, 12 s from 85 s, region 760,0,1040,1440): one group found, pitch 224.3, size 147, upscroll guessed and confirmed by motion (4307 up / 15 down votes), trail learned as (85, 85, 85). No labels yet, so the check was by linking observations into tracks: every note track starts at the far end of the strip and gets 30-88 observations before it is hit. Gaps: the judgment popup ("GOOD!") briefly hides notes in lanes 1-2 (a few frames), and a lit receptor is reported as a stationary head; both are for the M4 tracker.
 > - Real-clip labels (`cli label`) and the press-correlation side step move to M4.
+
+## Known limits (M3/M4)
+- Middle notes of 3+ note jacks whose heads overlap (50 ms jacks below ~2.5 px/ms at 720p; at the user's 1.9 px/ms at 1440p a 50 ms jack overlaps, a 100 ms one does not) are not visible on their own until the notes in front are hit; the lit receptor can then merge with them too. They are reported as missed by the M4 replay test (`hidden_unpressed`). Splitting on the near note's outline needs real footage of such a jack.
+- A static saturated background (for example pure blue) passes the learning foreground rule by chroma alone; the learner then finds no head-sized runs. The background model is luma only.
+- `cli detect` on a clip recorded with a region that cuts through a strip skips that lane while learning.
+- A receptor box clipped by the screen edge can give a flat presence template (NCC 0).
+- Profiles never stored colours before M4, so a `[colours]` table without `head_len` is not handled.

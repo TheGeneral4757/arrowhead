@@ -25,10 +25,12 @@ zstd = "0.14"
 libc = "0.2"
 ashpd = { version = "0.14", default-features = false, features = ["tokio", "screencast"] }
 pipewire = "0.10"
-tokio = { version = "1", features = ["rt", "time"] }
+tokio = { version = "1", features = ["rt", "time", "net"] }
 tempfile = "3"
 clap = { version = "4.6", features = ["derive"] }
 png = "0.18"
+evdev = "0.13"
+zbus = { version = "6.5", default-features = false, features = ["tokio", "service"] }
 
 # Detection and the synthetic frame tests are pixel loops; debug builds are too slow for them.
 [profile.dev.package.arrowhead-core]

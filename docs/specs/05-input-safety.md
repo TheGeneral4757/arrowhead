@@ -81,3 +81,9 @@ Setup's Permissions step shows which backend is active; the `input` group hint a
 ## Acceptance
 - Unit tests for S1, S4 with `RecordingSink`; integration test kills the CLI with SIGKILL mid-hold and checks via an evdev reader that the key is released (kernel release on device destroy). SIGKILL cannot run hooks, which is why this matters.
 - Focus probe works on KDE Plasma 6 and Hyprland with Sober (manual check list in [09](09-testing.md)).
+
+## M4 status (2026-11-21)
+- `UinputSink` (evdev 0.13): device "arrowhead virtual keyboard" with only the 4 lane keys, one `emit` per batch, waits for the device node then 300 ms for the compositor. Not yet run against the game.
+- `KwinProbe`: serves `org.arrowhead.Focus` on the session bus, loads a generated KWin script with `org.kde.kwin.Scripting.loadScript`/`start`, unloads it on drop. Checked on Plasma 6: reports the active window's `resourceClass` within 0.1 s (`cli focus`). Sober's class still to be confirmed with the game running.
+- `cli run` polls the probe at 10 Hz into the scheduler's focus gate; on focus loss everything is released. No report yet counts as focused (fail open) unless `safety.require_focus_guard`.
+- The `input` group is not set on the dev box, so the evdev hotkey fallback cannot read keyboards; hotkeys wait for the GlobalShortcuts portal. Until then: alt-tab away (focus gate) or Ctrl+C in the terminal; the kernel releases uinput keys when the process exits.

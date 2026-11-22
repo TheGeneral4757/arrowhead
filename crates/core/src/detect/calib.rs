@@ -186,6 +186,9 @@ pub fn find_groups(blobs: &[Blob], stream_h: u32) -> Vec<Group> {
             let dev: f32 = (0..3)
                 .map(|n| ((b[idx[n + 1]].cx - b[idx[n]].cx) - pitch).abs() / pitch)
                 .fold(0.0, f32::max);
+            if dev >= 0.08 {
+                continue;
+            }
             let ys: f32 = idx.iter().map(|&n| (b[n].cy - b[i].cy).abs()).sum::<f32>() / ytol;
             cands.push((dev + 0.1 * ys, idx));
         }
@@ -344,6 +347,9 @@ fn p95_dist(px: &[Opp], c: Opp) -> i32 {
     *d.select_nth_unstable(k).1
 }
 
+/// Head candidates kept per lane (the cluster search is quadratic).
+const MAX_RUNS: usize = 400;
+
 struct HeadRun {
     colour: Opp,
     len: u32,
@@ -402,28 +408,58 @@ impl ColourLearner {
             let w = s.w as usize;
             let mut fills = vec![0u16; s.h as usize];
             let mut rows: Vec<Vec<Opp>> = vec![Vec::new(); s.h as usize];
+            // Pixels clearly off the background (2x bg_tol); only these feed the trail colour.
+            let mut strong: Vec<Opp> = Vec::new();
+            let mut strong_rows = vec![(0u32, 0u32); s.h as usize];
             for (ri, row) in rows.iter_mut().enumerate() {
                 let y = s.y + ri as i32;
                 for xi in 0..w {
                     let (r, g, b) = f.px(s.x + xi as i32, y);
                     let o = Opp::from_rgb(r, g, b);
                     let bgl = self.bg[lane][ri * w + xi] as i32;
-                    if o.chroma() > self.cfg.learn_chroma
-                        || (o.2 as i32 - bgl).abs() > self.cfg.bg_tol
-                    {
+                    let dy = (o.2 as i32 - bgl).abs();
+                    if o.chroma() > self.cfg.learn_chroma || dy > self.cfg.bg_tol {
                         row.push(o);
                     }
+                    // Middle half of the strip only: a trail is always there, popups and
+                    // neighbours' edges are not.
+                    let mid = xi >= w / 4 && xi < w - w / 4;
+                    if mid && (o.chroma() > self.cfg.learn_chroma || dy > 2 * self.cfg.bg_tol) {
+                        strong.push(o);
+                    }
+                }
+                strong_rows[ri].1 = strong.len() as u32;
+                if ri + 1 < strong_rows.len() {
+                    strong_rows[ri + 1].0 = strong.len() as u32;
                 }
                 fills[ri] = row.len() as u16;
             }
             let mut runs = Vec::new();
             super::runs(
                 &fills,
-                (self.cfg.head_fill * w as f32).ceil() as u16,
+                // Trail fill (lower than head fill), so a trail stays one long run instead of
+                // breaking into head-sized pieces where its fill hovers near the head threshold.
+                (self.cfg.trail_fill * w as f32).ceil() as u16,
                 s.y,
                 &mut runs,
             );
-            for q in runs {
+            // Head candidates at the detector's own head fill (so lengths match what it sees),
+            // outside long runs; long runs (holds) at trail fill.
+            let mut hruns = Vec::new();
+            super::runs(
+                &fills,
+                (self.cfg.head_fill * w as f32).ceil() as u16,
+                s.y,
+                &mut hruns,
+            );
+            let long = |t: &super::Run| (t.b - t.a + 1) as f32 >= 1.8 * self.layout.size;
+            let cands: Vec<(super::Run, bool)> = hruns
+                .iter()
+                .filter(|q| !runs.iter().any(|t| long(t) && t.a <= q.a && q.b <= t.b))
+                .map(|q| (*q, true))
+                .chain(runs.iter().filter(|t| long(t)).map(|t| (*t, false)))
+                .collect();
+            for (q, is_head) in cands {
                 let len = (q.b - q.a + 1) as f32;
                 // Head candidates must not be cut by the strip ends or touch the receptor zone;
                 // trails usually are, and that is fine.
@@ -432,15 +468,51 @@ impl ColourLearner {
                 let px: Vec<Opp> = (q.a..=q.b)
                     .flat_map(|y| rows[(y - s.y) as usize].iter().copied())
                     .collect();
-                if whole && (0.3 * self.layout.size..=1.6 * self.layout.size).contains(&len) {
+                if is_head
+                    && whole
+                    && (0.3 * self.layout.size..=1.6 * self.layout.size).contains(&len)
+                {
+                    let colour = median_opp(&px);
+                    // A grey run barely off the background is the background animating.
+                    let bg_y = {
+                        let mut v: Vec<u8> = (q.a..=q.b)
+                            .flat_map(|y| {
+                                let r = (y - s.y) as usize;
+                                self.bg[lane][r * w..(r + 1) * w].iter().copied()
+                            })
+                            .collect();
+                        median_u8(&mut v) as i32
+                    };
+                    if colour.chroma() <= self.cfg.learn_chroma
+                        && (colour.2 as i32 - bg_y).abs() < 2 * self.cfg.bg_tol
+                    {
+                        continue;
+                    }
+                    if self.heads[lane].len() >= MAX_RUNS {
+                        continue;
+                    }
                     self.heads[lane].push(HeadRun {
-                        colour: median_opp(&px),
+                        colour,
                         len: len as u32,
                         px: px.into_iter().step_by(3).collect(),
                     });
-                } else if len >= 1.8 * self.layout.size {
-                    self.trail_runs += 1;
-                    self.trail_px.extend(px.into_iter().step_by(5));
+                } else if !is_head {
+                    // Rows whose middle half is mostly clear pixels: a trail fills it, a long
+                    // run of animated background does not.
+                    let mid_w = (w - 2 * (w / 4)) as u32;
+                    let mut rows_ok = 0;
+                    for y in q.a..=q.b {
+                        let (a, b) = strong_rows[(y - s.y) as usize];
+                        if b - a >= mid_w / 2 {
+                            rows_ok += 1;
+                            if y % 5 == 0 {
+                                self.trail_px.extend(&strong[a as usize..b as usize]);
+                            }
+                        }
+                    }
+                    if rows_ok as f32 >= self.layout.size {
+                        self.trail_runs += 1;
+                    }
                 }
             }
         }
@@ -459,7 +531,23 @@ impl ColourLearner {
         let mut head_len = [0.0; 4];
         for lane in 0..4 {
             let runs = &self.heads[lane];
-            let colours: Vec<Opp> = runs.iter().map(|r| r.colour).collect();
+            // Densest colour cluster (trail pieces or glow can make up a sizeable minority, and a
+            // per-channel median of a mixture is no colour at all).
+            let tol = cfg.head_tol_max;
+            let seed = runs
+                .iter()
+                .max_by_key(|a| {
+                    runs.iter()
+                        .filter(|b| a.colour.dist(b.colour) <= tol)
+                        .count()
+                })
+                .map(|r| r.colour)
+                .unwrap_or_default();
+            let colours: Vec<Opp> = runs
+                .iter()
+                .map(|r| r.colour)
+                .filter(|c| c.dist(seed) <= tol)
+                .collect();
             let c = median_opp(&colours);
             let inliers: Vec<&HeadRun> = runs
                 .iter()
@@ -468,10 +556,17 @@ impl ColourLearner {
             let px: Vec<Opp> = inliers.iter().flat_map(|r| r.px.iter().copied()).collect();
             heads[lane] = c;
             head_tol[lane] = p95_dist(&px, c).clamp(cfg.head_tol_min, cfg.head_tol_max);
-            let mut lens: Vec<u32> = inliers.iter().map(|r| r.len).collect();
-            lens.sort_unstable();
+            // Most common length (+/- 3 px): one head always gives the same run, merged jacks
+            // give a spread of longer ones that would drag a median up.
+            let lens: Vec<u32> = inliers.iter().map(|r| r.len).collect();
             head_len[lane] = lens
-                .get(lens.len() / 2)
+                .iter()
+                .max_by_key(|&&l| {
+                    (
+                        lens.iter().filter(|&&m| m.abs_diff(l) <= 3).count(),
+                        u32::MAX - l,
+                    )
+                })
                 .map_or(self.layout.run_len[lane], |&l| l as f32);
         }
         let tp: Vec<Opp> = self
@@ -488,7 +583,22 @@ impl ColourLearner {
         } else {
             median_u8(&mut bgl) as i32
         };
-        let t = (self.trail_runs >= 3 && tp.len() >= 200).then(|| median_opp(&tp));
+        let t = (self.trail_runs >= 3 && tp.len() >= 200).then(|| {
+            // Densest cluster, as for heads: the pool mixes trail, popups and edges.
+            let sample: Vec<Opp> = tp
+                .iter()
+                .step_by((tp.len() / 300).max(1))
+                .copied()
+                .collect();
+            let tol = cfg.trail_tol_max;
+            let seed = sample
+                .iter()
+                .max_by_key(|a| sample.iter().filter(|b| a.dist(**b) <= tol).count())
+                .copied()
+                .unwrap_or_default();
+            let near: Vec<Opp> = tp.iter().copied().filter(|p| p.dist(seed) <= tol).collect();
+            median_opp(&near)
+        });
         let (trail, trail_tol) = match t {
             Some(t)
                 if (t.2 as i32 - bg_y).abs() > 2 * cfg.bg_tol || t.chroma() > cfg.learn_chroma =>
