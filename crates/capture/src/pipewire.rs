@@ -10,7 +10,9 @@ use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use arrowhead_core::frame::{CaptureError, FrameSource, FrameView, OwnedFrame, Rect, SourceInfo};
+use arrowhead_core::frame::{
+    AuxTap, CaptureError, FrameSource, FrameView, OwnedFrame, Rect, SourceInfo,
+};
 use arrowhead_core::runtime::platform::monotonic_ns;
 use arrowhead_core::time::Nanos;
 use pipewire as pw;
@@ -45,6 +47,7 @@ struct Portal {
 pub struct PipewireSource {
     shared: Arc<Shared>,
     monitor: String,
+    aux: Arc<AuxTap>,
     quit_tx: Option<pw::channel::Sender<Quit>>,
     join: Option<JoinHandle<()>>,
     _portal: Portal,
@@ -155,11 +158,13 @@ impl PipewireSource {
         let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<(), String>>(1);
         let (quit_tx, quit_rx) = pw::channel::channel::<Quit>();
         let s2 = shared.clone();
+        let aux = Arc::new(AuxTap::default());
+        let a2 = aux.clone();
         let (fd, node_id) = (hs.fd, hs.node_id);
         let join = std::thread::Builder::new()
             .name("ah-pipewire".into())
             .spawn(move || {
-                if let Err(e) = run_loop(fd, node_id, s2.clone(), ready_tx.clone(), quit_rx) {
+                if let Err(e) = run_loop(fd, node_id, s2.clone(), a2, ready_tx.clone(), quit_rx) {
                     let _ = ready_tx.send(Err(e.clone()));
                     s2.ring.close(e, true);
                 }
@@ -169,6 +174,7 @@ impl PipewireSource {
         let src = Self {
             shared,
             monitor: hs.monitor,
+            aux,
             quit_tx: Some(quit_tx),
             join: Some(join),
             _portal: Portal {
@@ -199,6 +205,8 @@ pub fn default_token_file() -> Option<PathBuf> {
 
 struct UserData {
     shared: Arc<Shared>,
+    aux: Arc<AuxTap>,
+    frame_n: u64,
     format: Option<(u32, u32)>,
     ready: Option<mpsc::SyncSender<Result<(), String>>>,
     warned_dmabuf: bool,
@@ -209,6 +217,7 @@ fn run_loop(
     fd: OwnedFd,
     node_id: u32,
     shared: Arc<Shared>,
+    aux: Arc<AuxTap>,
     ready: mpsc::SyncSender<Result<(), String>>,
     quit_rx: pw::channel::Receiver<Quit>,
 ) -> Result<(), String> {
@@ -235,6 +244,8 @@ fn run_loop(
         pw::stream::StreamBox::new(&core, "arrowhead capture", props).map_err(e("stream"))?;
     let data = UserData {
         shared: shared.clone(),
+        aux,
+        frame_n: 0,
         format: None,
         ready: Some(ready),
         warned_dmabuf: false,
@@ -327,6 +338,19 @@ fn run_loop(
             };
 
             let full = Rect::new(0, 0, w, h);
+            // Side copies for the HUD: `due` is a try_lock and None on most frames.
+            data.frame_n += 1;
+            let pts_ns = Nanos(pts.unwrap_or(now));
+            data.aux.copy_from(
+                data.frame_n,
+                &FrameView {
+                    seq: data.frame_n,
+                    pts: pts_ns,
+                    region: full,
+                    stride,
+                    data: bytes,
+                },
+            );
             data.shared.ring.produce(|slot, want| {
                 let r = if want.w == 0 || want.h == 0 {
                     full
@@ -476,6 +500,10 @@ impl FrameSource for PipewireSource {
             scale: 1.0,
             pts_is_receive_time: s.pts_is_receive_time.load(Ordering::Relaxed),
         }
+    }
+
+    fn aux(&self) -> Option<Arc<AuxTap>> {
+        Some(self.aux.clone())
     }
 
     fn snapshot(&mut self) -> Result<OwnedFrame, CaptureError> {

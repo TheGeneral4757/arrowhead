@@ -8,7 +8,9 @@ use std::sync::{Arc, mpsc};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use arrowhead_core::frame::{CaptureError, FrameSource, FrameView, OwnedFrame, Rect, SourceInfo};
+use arrowhead_core::frame::{
+    AuxTap, CaptureError, FrameSource, FrameView, OwnedFrame, Rect, SourceInfo,
+};
 use arrowhead_core::runtime::platform::{make_realtime, qpc_ticks_to_ns};
 use arrowhead_core::time::Nanos;
 use windows::Win32::Foundation::HMODULE;
@@ -46,6 +48,7 @@ struct Shared {
 }
 
 pub struct DxgiSource {
+    aux: Arc<AuxTap>,
     shared: Arc<Shared>,
     stop: Arc<AtomicBool>,
     join: Option<JoinHandle<()>>,
@@ -70,6 +73,10 @@ struct Capturer {
     context: ID3D11DeviceContext,
     dup: Option<IDXGIOutputDuplication>,
     staging: Option<(ID3D11Texture2D, u32, u32)>,
+    /// Staging textures for the HUD side copies, one per size.
+    aux_staging: Vec<(ID3D11Texture2D, u32, u32)>,
+    aux: Arc<AuxTap>,
+    frames: u64,
     width: u32,
     height: u32,
     refresh_milli: u32,
@@ -104,7 +111,7 @@ fn find_output() -> Result<(IDXGIAdapter1, IDXGIOutput1), CaptureError> {
 }
 
 impl Capturer {
-    fn new() -> Result<Self, CaptureError> {
+    fn new(aux: Arc<AuxTap>) -> Result<Self, CaptureError> {
         let (adapter, output) = find_output()?;
         let (mut device, mut context) = (None, None);
         // SAFETY: out pointers are valid. The device must come from the output's own adapter,
@@ -133,6 +140,9 @@ impl Capturer {
             context,
             dup: None,
             staging: None,
+            aux_staging: Vec::new(),
+            aux,
+            frames: 0,
             width: 0,
             height: 0,
             refresh_milli: 0,
@@ -255,7 +265,95 @@ impl Capturer {
             slot.pts = pts;
             true
         });
+        self.frames += 1;
+        if let Some(rects) = self.aux.due(self.frames) {
+            // A failed side copy must not take the capture down: the HUD just misses a set.
+            if let Err(e) = self.copy_aux(&tex, &rects, (sw, sh), self.frames, pts) {
+                eprintln!("capture: aux copy: {e}");
+            }
+        }
         fault.map_or(Ok(()), Err)
+    }
+
+    /// Copies each due rect (clipped to the desktop) into a cached staging texture and maps it.
+    fn copy_aux(
+        &mut self,
+        tex: &ID3D11Texture2D,
+        rects: &[Rect],
+        (sw, sh): (u32, u32),
+        seq: u64,
+        pts: Nanos,
+    ) -> Result<(), String> {
+        let desktop = Rect::new(0, 0, sw, sh);
+        let mut out = Vec::with_capacity(rects.len());
+        for r in rects.iter().filter_map(|r| r.intersect(&desktop)) {
+            let i = match self
+                .aux_staging
+                .iter()
+                .position(|(_, w, h)| (*w, *h) == (r.w, r.h))
+            {
+                Some(i) => i,
+                None => {
+                    let desc = D3D11_TEXTURE2D_DESC {
+                        Width: r.w,
+                        Height: r.h,
+                        MipLevels: 1,
+                        ArraySize: 1,
+                        Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                        SampleDesc: DXGI_SAMPLE_DESC {
+                            Count: 1,
+                            Quality: 0,
+                        },
+                        Usage: D3D11_USAGE_STAGING,
+                        BindFlags: 0,
+                        CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+                        MiscFlags: 0,
+                    };
+                    let mut t = None;
+                    // SAFETY: valid desc and out pointer.
+                    unsafe { self.device.CreateTexture2D(&desc, None, Some(&mut t)) }
+                        .map_err(|e| format!("CreateTexture2D: {e}"))?;
+                    let t = t.ok_or("CreateTexture2D gave no texture")?;
+                    self.aux_staging.push((t, r.w, r.h));
+                    self.aux_staging.len() - 1
+                }
+            };
+            let staging = &self.aux_staging[i].0;
+            let b = D3D11_BOX {
+                left: r.x as u32,
+                top: r.y as u32,
+                front: 0,
+                right: r.x as u32 + r.w,
+                bottom: r.y as u32 + r.h,
+                back: 1,
+            };
+            let mut m = D3D11_MAPPED_SUBRESOURCE::default();
+            let row = r.w as usize * 4;
+            let mut data = vec![0u8; row * r.h as usize];
+            // SAFETY: the box is inside the desktop texture; the mapped memory is valid for
+            // `RowPitch * h` bytes until Unmap and only read inside this block.
+            unsafe {
+                self.context
+                    .CopySubresourceRegion(staging, 0, 0, 0, 0, tex, 0, Some(&b));
+                self.context
+                    .Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut m))
+                    .map_err(|e| format!("Map: {e}"))?;
+                let src = m.pData as *const u8;
+                for y in 0..r.h as usize {
+                    let line = std::slice::from_raw_parts(src.add(y * m.RowPitch as usize), row);
+                    data[y * row..(y + 1) * row].copy_from_slice(line);
+                }
+                self.context.Unmap(staging, 0);
+            }
+            out.push(OwnedFrame {
+                seq,
+                pts,
+                region: r,
+                data,
+            });
+        }
+        self.aux.deliver(out);
+        Ok(())
     }
 
     /// One pass of the loop: wait for a frame, deliver it, release it.
@@ -321,7 +419,7 @@ fn run(mut cap: Capturer, shared: &Shared, stop: &AtomicBool, (w0, h0): (u32, u3
 
 impl DxgiSource {
     /// Starts duplicating the primary monitor and waits for the device and duplication.
-    pub fn open() -> Result<Self, CaptureError> {
+    pub fn open(aux: Arc<AuxTap>) -> Result<Self, CaptureError> {
         let shared = Arc::new(Shared {
             ring: Ring::new(),
             width: AtomicU32::new(0),
@@ -329,6 +427,7 @@ impl DxgiSource {
             refresh_milli: AtomicU32::new(0),
         });
         let stop = Arc::new(AtomicBool::new(false));
+        let aux2 = aux.clone();
         let (tx, rx) = mpsc::channel();
         let (s2, st2) = (shared.clone(), stop.clone());
         let join = std::thread::Builder::new()
@@ -336,7 +435,7 @@ impl DxgiSource {
             .spawn(move || {
                 make_realtime();
                 // D3D objects are created on this thread and never leave it.
-                let cap = match Capturer::new() {
+                let cap = match Capturer::new(aux) {
                     Ok(c) => c,
                     Err(e) => return drop(tx.send(Err(e))),
                 };
@@ -350,6 +449,7 @@ impl DxgiSource {
             .map_err(backend)?;
         match rx.recv_timeout(Duration::from_secs(5)) {
             Ok(Ok(())) => Ok(Self {
+                aux: aux2,
                 shared,
                 stop,
                 join: Some(join),
@@ -384,6 +484,10 @@ impl FrameSource for DxgiSource {
             scale: 1.0,
             pts_is_receive_time: false,
         }
+    }
+
+    fn aux(&self) -> Option<Arc<AuxTap>> {
+        Some(self.aux.clone())
     }
 
     fn snapshot(&mut self) -> Result<OwnedFrame, CaptureError> {

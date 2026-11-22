@@ -97,3 +97,15 @@ Built and cross-checked (`cargo clippy --target x86_64-pc-windows-msvc`), never 
 - `capture::WindowsSource` picks by `capture.windows_backend` (`winpolicy::backend_order`): `auto` = dxgi, wgc-monitor, wgc-window; a named backend does not fall back. In `auto`, a `Backend` error from the running source moves to the next backend in place (region kept); `SourceLost` and `PermissionDenied` go to the caller as before.
 - Departures: monitor choice is fixed to the primary monitor (no setting yet, see P9); no WGC border detection for Setup (P10).
 - Untested until a Windows machine runs it: everything above, in particular `cli capture` numbers (fps, pts age, copy time), the fallback, hybrid GPU, exclusive fullscreen.
+
+## v0.2: HUD side copies
+
+The capture region is cropped to the lane strips, but the HUD reader (spec 03) needs small areas outside it (stats panel, counts, scores). Each live backend owns an `Arc<AuxTap>` (`FrameSource::aux()`); the HUD thread requests rects and a frame interval, and the capture thread copies them. Nothing is copied unless the HUD has requested rects, and a frame that is not due costs one `try_lock`. The tap never blocks the capture thread: a busy tap drops that set. Clip replay returns `None`.
+
+| Backend | Copy |
+|---|---|
+| PipeWire | `copy_from` over the full mapped SHM buffer (region = full stream, buffer stride); CPU row copies of the due rects only. |
+| DXGI | `CopySubresourceRegion` of each rect (clipped to the desktop) into a staging texture cached per size, `Map`, rows copied into an `OwnedFrame` with the frame's seq/pts. |
+| WGC | `frame.buffer()` (full-frame map) on due frames only, then `copy_from`. This maps the whole frame, so it is the costliest path; fine at HUD rates (a few Hz). |
+
+`WindowsSource` creates one tap and passes it to every inner backend it opens, including after a fallback, so the HUD thread's handle stays valid across a backend switch.

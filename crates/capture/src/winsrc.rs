@@ -4,7 +4,9 @@
 use std::time::Duration;
 
 use arrowhead_core::config::WindowsBackend;
-use arrowhead_core::frame::{CaptureError, FrameSource, FrameView, OwnedFrame, Rect, SourceInfo};
+use std::sync::Arc;
+
+use arrowhead_core::frame::{AuxTap, CaptureError, FrameSource, FrameView, OwnedFrame, Rect, SourceInfo};
 
 use crate::dxgi::DxgiSource;
 use crate::ring::RingStats;
@@ -22,13 +24,15 @@ pub struct WindowsSource {
     inner: Inner,
     region: Rect,
     classes: Vec<String>,
+    /// Handed to every inner backend, so the HUD thread's handle survives a fallback.
+    aux: Arc<AuxTap>,
 }
 
-fn open_kind(kind: Kind, classes: &[String]) -> Result<Inner, CaptureError> {
+fn open_kind(kind: Kind, classes: &[String], aux: &Arc<AuxTap>) -> Result<Inner, CaptureError> {
     Ok(match kind {
-        Kind::Dxgi => Inner::Dxgi(DxgiSource::open()?),
-        Kind::WgcMonitor => Inner::Wgc(WgcSource::open_monitor()?),
-        Kind::WgcWindow => Inner::Wgc(WgcSource::open_window(classes)?),
+        Kind::Dxgi => Inner::Dxgi(DxgiSource::open(aux.clone())?),
+        Kind::WgcMonitor => Inner::Wgc(WgcSource::open_monitor(aux.clone())?),
+        Kind::WgcWindow => Inner::Wgc(WgcSource::open_window(classes, aux.clone())?),
     })
 }
 
@@ -37,9 +41,10 @@ impl WindowsSource {
     /// `safety.game_window_classes` (used to find the window for WGC window).
     pub fn open(backend: WindowsBackend, classes: Vec<String>) -> Result<Self, CaptureError> {
         let order = backend_order(backend);
+        let aux = Arc::new(AuxTap::default());
         let mut last = None;
         for (idx, &kind) in order.iter().enumerate() {
-            match open_kind(kind, &classes) {
+            match open_kind(kind, &classes, &aux) {
                 Ok(inner) => {
                     return Ok(Self {
                         order,
@@ -47,6 +52,7 @@ impl WindowsSource {
                         inner,
                         region: Rect::default(),
                         classes,
+                        aux,
                     });
                 }
                 Err(CaptureError::PermissionDenied) => return Err(CaptureError::PermissionDenied),
@@ -91,7 +97,7 @@ impl WindowsSource {
                 self.order[self.idx - 1].name(),
                 kind.name()
             );
-            if let Ok(mut inner) = open_kind(kind, &self.classes) {
+            if let Ok(mut inner) = open_kind(kind, &self.classes, &self.aux) {
                 match &mut inner {
                     Inner::Dxgi(s) => s.set_region(self.region),
                     Inner::Wgc(s) => s.set_region(self.region),
@@ -129,6 +135,10 @@ impl FrameSource for WindowsSource {
             Inner::Dxgi(s) => s.info(),
             Inner::Wgc(s) => s.info(),
         }
+    }
+
+    fn aux(&self) -> Option<Arc<AuxTap>> {
+        Some(self.aux.clone())
     }
 
     fn snapshot(&mut self) -> Result<OwnedFrame, CaptureError> {
