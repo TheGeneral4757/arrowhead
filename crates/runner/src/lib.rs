@@ -461,6 +461,22 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
     let plan = PlanConfig::from_config(&cfg, offset_ms);
     let max_hold = plan.max_hold_ms;
     let mut eng = Engine::new(det, plan);
+    // Player style from config.toml (spec 06); Max or an unknown name leaves the planner unchanged.
+    let style = arrowhead_core::style::find_style(config_dir().as_deref(), &cfg.style);
+    if !style.is_max() {
+        log(
+            &tx,
+            Level::Info,
+            format!("style: {} (target {}%)", style.name, style.target),
+        );
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos() as u64);
+        eng.planner
+            .set_style(arrowhead_core::style::StylePlayer::new(
+                style, &cfg.game, seed, 600,
+            ));
+    }
 
     // Focus guard (S3): fail open with a warning unless the config requires it.
     let focus = Arc::new(AtomicBool::new(true));

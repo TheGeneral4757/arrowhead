@@ -55,11 +55,12 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::config::Scroll;
+    use crate::config::{Game, Scroll};
     use crate::detect::synth_tests::calibrate;
     use crate::frame::Rect;
     use crate::input::{KeyAction, RecordingSink};
     use crate::sched::Scheduler;
+    use crate::style::{Style, StylePlayer};
     use crate::testkit::*;
     use crate::time::{Clock, VirtualClock};
 
@@ -82,6 +83,10 @@ mod tests {
         holds: usize,
         worst_release_ms: f64,
         missed_by_engine: u32,
+        presses: usize,
+        style_misses: u32,
+        /// Presses held under 8 ms: a jack whose notes were pressed out of order.
+        short_presses: usize,
     }
 
     fn worst(cur: &mut f64, err: f64) {
@@ -91,6 +96,17 @@ mod tests {
     }
 
     fn suite(seed: u64, fps: f64, speed: f64, scroll: Scroll, notes: usize) -> Score {
+        suite_with(seed, fps, speed, scroll, notes, None)
+    }
+
+    fn suite_with(
+        seed: u64,
+        fps: f64,
+        speed: f64,
+        scroll: Scroll,
+        notes: usize,
+        style: Option<StylePlayer>,
+    ) -> Score {
         let mut rng = Rng(seed);
         let mut s = Scene::random(&mut rng, 1280, 720, scroll, speed);
         s.fps = fps;
@@ -99,6 +115,9 @@ mod tests {
         let region = cal.layout.region(&cal.det.cfg);
         let strips: Vec<Rect> = (0..4).map(|l| cal.det.strip(l)).collect();
         let mut eng = Engine::new(cal.det, PlanConfig::default());
+        if let Some(p) = style {
+            eng.planner.set_style(p);
+        }
         let clock = Arc::new(VirtualClock::default());
         let mut sink = RecordingSink::new(clock.clone());
         let mut sched = Scheduler::new(15_000.0);
@@ -127,6 +146,7 @@ mod tests {
         let mut sc = Score {
             notes: chart.len(),
             missed_by_engine: eng.planner.missed_by_engine,
+            style_misses: eng.planner.style_misses,
             ..Default::default()
         };
         for lane in 0..4u8 {
@@ -180,9 +200,61 @@ mod tests {
                     None => sc.unpressed += 1,
                 }
             }
+            sc.short_presses += presses
+                .iter()
+                .zip(&releases)
+                .filter(|(p, r)| r.ms_since(**p) < 7.9)
+                .count();
             sc.extra += used.iter().filter(|u| !**u).count();
+            sc.presses += presses.len();
         }
         sc
+    }
+
+    #[test]
+    fn max_style_changes_nothing() {
+        let a = suite(70, 144.0, 2.0, Scroll::Up, 60);
+        let b = suite_with(
+            70,
+            144.0,
+            2.0,
+            Scroll::Up,
+            60,
+            Some(StylePlayer::new(Style::max(), &Game::default(), 1, 60)),
+        );
+        assert_eq!(format!("{a:?}"), format!("{b:?}"));
+    }
+
+    #[test]
+    fn styled_replay_skips_misses_and_releases_everything() {
+        let st = Style {
+            miss_floor: 0.1,
+            ..Style::builtin("Casual friend").unwrap()
+        };
+        let p = StylePlayer::new(st, &Game::default(), 5, 150);
+        let sc = suite_with(71, 144.0, 2.0, Scroll::Up, 150, Some(p));
+        // Presses = notes - style misses (a few hidden middle jack notes aside); suite() already
+        // asserted every press has a release.
+        assert!(sc.style_misses > 5, "{sc:?}");
+        assert!(
+            sc.presses + sc.style_misses as usize <= sc.notes + sc.extra,
+            "{sc:?}"
+        );
+        assert!(
+            sc.presses >= sc.notes - sc.style_misses as usize - 8,
+            "{sc:?}"
+        );
+    }
+
+    #[test]
+    fn styled_jacks_keep_note_order() {
+        // Rusty's wide errors would swap the notes of 50-100 ms jacks without the lane floor.
+        for seed in [72, 90, 91] {
+            let st = Style::builtin("Rusty").unwrap();
+            let p = StylePlayer::new(st, &Game::default(), seed, 200).with_fixed_k(1.5);
+            let sc = suite_with(seed, 144.0, 2.0, Scroll::Up, 200, Some(p));
+            assert_eq!(sc.short_presses, 0, "seed {seed}: {sc:?}");
+        }
     }
 
     #[test]

@@ -11,6 +11,8 @@ pub mod plan;
 pub mod runtime;
 pub mod sched;
 pub mod session;
+pub mod style;
+
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
 pub mod time;
