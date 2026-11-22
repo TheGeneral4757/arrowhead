@@ -29,8 +29,8 @@ The reference images in `docs/research/ff-refs/` are rough examples, not evidenc
 ## Platform
 | # | Question | Default | How | Answer |
 |---|---|---|---|---|
-| P1 | Sober 16 fps while focused (issue #2027) on this box, KDE and Hyprland | unknown, blocks accuracy | Run a song, watch Sober's FPS | KDE: no. Steady 165 fps focused (Roblox stats and 1650 unique frames in 10 s of video, 2026-11-21). Hyprland untested |
-| P2 | PipeWire pts and SHM copy time at full refresh | measure | `cli capture` (M2) | |
+| P1 | Sober 16 fps while focused (issue #2027) on this box, KDE and Hyprland | unknown, blocks accuracy | Run a song, watch Sober's FPS | KDE: no. Steady 165 fps focused (Roblox stats and 1650 unique frames in 10 s of video, 2026-11-21). Hyprland: user reports near-identical fps from past play and will not run arrowhead there |
+| P2 | PipeWire pts and SHM copy time at full refresh | measure | `cli capture` (M2) | KDE: pts present, age p50 2.0 / p99 7.0 ms; 165 Hz intervals while the screen changes (damage-driven, so a still screen sends almost nothing). During a song: 164.8 fps, interval p50/p99 6.06/6.06 ms, pts age p50 2.8 / p99 4.8 ms, copy 291/370 us (p50/p99) for 840x900, 0 drops |
 | P3 | Does Sober receive uinput keys reliably (issues #1959, #1940)? | yes per v2 | Key test in Setup | |
 | P4 | Layer-shell overlay above fullscreen Sober on KWin and Hyprland | unknown | Spike | |
 | P5 | KWin script focus probe sees Sober's class | unknown | Spike | |

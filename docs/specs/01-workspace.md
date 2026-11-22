@@ -57,7 +57,7 @@ M1 notes (2026-11-21):
 - Only crates the code uses are in `[workspace.dependencies]` (tauri 2.12, tauri-build 2.7, serde, serde_json). Each milestone adds its rows from this table after checking crates.io.
 - UI: TypeScript stays on 6.0 because typescript-eslint 8 does not support 7 yet.
 - The Tauri CLI does not look outside `ui/` for `crates/app/tauri.conf.json`, so `npm run tauri` goes through `ui/scripts/tauri.mjs`, which sets `TAURI_APP_PATH`.
-- `arrowhead-cli` parses args by hand until M2 gives commands real options (then clap).
+- `arrowhead-cli` uses clap 4.6 from M2. M2 added toml 1, toml_edit 0.25, dirs 7, zstd 0.14, libc, ashpd 0.14, pipewire 0.10, tokio 1, tempfile 3 (dev).
 
 Not used: xcap, scap, rdev, opencv, tesseract, AVX2 intrinsics (strips are small; scalar code is fast enough, see [03](03-detection.md#performance-budget)).
 
