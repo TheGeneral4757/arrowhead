@@ -13,6 +13,7 @@ Visual reference: [design-review.html](../vision/design-review.html) (Layout 1, 
 - Dark only. Fonts: Host Grotesk (UI), Atkinson Hyperlegible Mono (numbers), bundled locally (no Google Fonts call at runtime: no network rule).
 - Colour roles: amber (`--color-accent`) for things the user sets, cool blue (`--color-cool`) for measured values. Judgment colours from `--judge-*`.
 - Window: 1100 x 760 default, min 900 x 600. Remembers size and position.
+- Scales with the window: the root font size runs from 16px (1280 x 800 and smaller) to 20px (2560 x 1440 and larger), whichever axis is smaller deciding; spacing, radii and control sizes are in rem so the whole UI scales with it. The lane canvas fills the window height. Content is capped at `--container` (90rem) and centred, so wider windows grow the gutters, not the grids.
 
 ## Layout 1: sidebar + pages
 Top bar: logo + name, state pill (Idle / Searching / Armed / Playing / Paused / Dry run), capture pill (backend + monitor), focus pill. Sidebar: pages with number keys 1-5; footer shows version, OS and active profile.

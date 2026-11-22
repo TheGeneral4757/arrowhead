@@ -31,7 +31,9 @@ function Lanes({ active }: { active: boolean }) {
     ro.observe(c);
     const cols = ["--lane-1", "--lane-2", "--lane-3", "--lane-4"].map(css);
     const [paper, rule, muted, accent] = ["--color-paper-3", "--color-rule", "--color-muted", "--color-accent"].map(css);
-    const font = `11px ${css("--font-mono")}`;
+    // Canvas text follows the UI scale (0.6875rem, 11px at the base size).
+    const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+    const font = `${0.6875 * rem}px ${css("--font-mono")}`;
     let raf = 0;
     const draw = () => {
       const g = c.getContext("2d");
@@ -44,11 +46,11 @@ function Lanes({ active }: { active: boolean }) {
         g.fillRect(0, 0, w, h);
         const lw = w / 4;
         const up = layout?.scroll !== "down";
-        const ry = up ? 52 : h - 52;
+        const ry = up ? 3.25 * rem : h - 3.25 * rem;
         const dir = up ? 1 : -1;
         // About 0.7 of the stream height is approach strip (detection's approach_len_frac).
-        const scale = layout ? (h - 64) / (0.7 * layout.stream[1]) : 1;
-        const sz = Math.min(lw * 0.62, layout ? Math.max(layout.size * scale, 12) : 44);
+        const scale = layout ? (h - 4 * rem) / (0.7 * layout.stream[1]) : 1;
+        const sz = Math.min(lw * 0.62, layout ? Math.max(layout.size * scale, 0.75 * rem) : 2.75 * rem);
         g.strokeStyle = rule;
         g.lineWidth = 1;
         for (let i = 1; i < 4; i++) {
@@ -63,7 +65,7 @@ function Lanes({ active }: { active: boolean }) {
           g.globalAlpha = now - frame.pressedAt[i] < 90 ? 0.95 : 0.35;
           g.strokeStyle = cols[i];
           g.lineWidth = 2;
-          roundRect(g, cx - sz / 2, ry - sz / 2, sz, sz, 8);
+          roundRect(g, cx - sz / 2, ry - sz / 2, sz, sz, 0.5 * rem);
           g.stroke();
         }
         g.globalAlpha = 1;
@@ -76,7 +78,7 @@ function Lanes({ active }: { active: boolean }) {
             if (n.tail) {
               g.fillRect(cx - sz * 0.3, y - 2, sz * 0.6, 4);
             } else {
-              roundRect(g, cx - sz / 2, y - sz / 2, sz, sz, 8);
+              roundRect(g, cx - sz / 2, y - sz / 2, sz, sz, 0.5 * rem);
               g.fill();
             }
           }
@@ -97,8 +99,8 @@ function Lanes({ active }: { active: boolean }) {
         g.font = font;
         g.fillText(
           !layout ? "calibrating: start a song" : dryRun ? "dry run, no keys sent" : "tracked notes, amber ticks are planned presses",
-          10,
-          up ? h - 12 : 18,
+          0.625 * rem,
+          up ? h - 0.75 * rem : 1.125 * rem,
         );
       }
       if (active) raf = requestAnimationFrame(draw);
