@@ -308,6 +308,42 @@ pub fn title(t: &str) -> (String, String) {
     }
 }
 
+/// The ms of the hit that took Hits from `prev_hits` to `hits = prev_hits + 1`, from the
+/// stats panel's Mean MS before and after (shown to 2 decimals), and how far off it can be
+/// from that rounding. `None` unless exactly one hit was added.
+pub fn hit_ms_from_mean(
+    prev_mean: f32,
+    prev_hits: u32,
+    mean: f32,
+    hits: u32,
+) -> Option<(f32, f32)> {
+    (hits == prev_hits + 1).then(|| {
+        let v = hits as f32 * mean - prev_hits as f32 * prev_mean;
+        (v, 0.005 * (2 * hits - 1) as f32 + 0.001)
+    })
+}
+
+/// The readout value to trust: the one candidate (OCR passes, glyph read) within `tol` of
+/// `expected`. Several different values that fit, or none: `None`.
+pub fn confirm_ms(cands: &[f32], expected: f32, tol: f32) -> Option<f32> {
+    let mut fit = cands
+        .iter()
+        .copied()
+        .filter(|c| (c - expected).abs() <= tol);
+    let first = fit.next()?;
+    fit.all(|c| (c - first).abs() < 0.005).then_some(first)
+}
+
+/// Judgment index (0 Sick .. 4 Miss) of a readout drawn in the judgment's colour: the
+/// count-row label colour nearest to `rgb` (each learned from the counts panel). `None`
+/// when no label is clearly nearest.
+pub fn judgment_by_colour(rgb: [f32; 3], labels: &[[f32; 3]; 5]) -> Option<usize> {
+    let d = |a: &[f32; 3]| (0..3).map(|i| (a[i] - rgb[i]).powi(2)).sum::<f32>().sqrt();
+    let mut ds: Vec<(f32, usize)> = labels.iter().enumerate().map(|(i, l)| (d(l), i)).collect();
+    ds.sort_by(|a, b| a.0.total_cmp(&b.0));
+    (ds[0].0 < 80.0 && ds[1].0 > 1.5 * ds[0].0).then_some(ds[0].1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,6 +439,52 @@ mod tests {
         // Misses read 70 / 170 and Miss 70 / 170, once each: 70 = 70 and 170 = 170 tie, so
         // neither is trusted until a pass settles it.
         assert_eq!((s.misses, c.miss), (None, None));
+    }
+
+    #[test]
+    fn hit_ms_checks_the_readout() {
+        // 218 hits at mean 77.41 -> 219 at 77.42 gives about 79.6 +/- 2.2 ms.
+        let (v, tol) = hit_ms_from_mean(77.41, 218, 77.42, 219).unwrap();
+        assert!(
+            (v - 79.6).abs() < 0.1 && (tol - 2.186).abs() < 0.01,
+            "{v} {tol}"
+        );
+        assert_eq!(confirm_ms(&[78.71, 72.71], v, tol), Some(78.71));
+        assert_eq!(
+            confirm_ms(&[72.71], v, tol),
+            None,
+            "OCR's 72.71 is not that hit"
+        );
+        assert_eq!(
+            hit_ms_from_mean(77.4, 218, 77.42, 220),
+            None,
+            "two hits: no single value"
+        );
+        // early in a song the bound is tight: hit 2 at mean 10.00 after hit 1 at 12.34
+        let (v2, t2) = hit_ms_from_mean(12.34, 1, 10.0, 2).unwrap();
+        assert!((v2 - 7.66).abs() < 1e-3 && t2 < 0.02);
+    }
+
+    #[test]
+    fn judgment_from_readout_colour() {
+        // label colours as seen on the counts panel: magenta, green, yellow, orange, red
+        let labels = [
+            [230.0, 90.0, 230.0],
+            [90.0, 230.0, 80.0],
+            [240.0, 220.0, 70.0],
+            [240.0, 160.0, 60.0],
+            [240.0, 80.0, 80.0],
+        ];
+        assert_eq!(
+            judgment_by_colour([100.0, 225.0, 95.0], &labels),
+            Some(1),
+            "green readout: Good"
+        );
+        assert_eq!(
+            judgment_by_colour([128.0, 128.0, 128.0], &labels),
+            None,
+            "grey: unsure"
+        );
     }
 
     #[test]
