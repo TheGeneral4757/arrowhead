@@ -162,6 +162,13 @@ export default function Settings({ update }: { update: UpdateInfo | null }) {
             <h3>App</h3>
           </div>
           <div className="panel-body set-list">
+            <Row title="Overlay over the game" note="Click-through lanes, presses and hit errors. Auto shows it only on a single-monitor setup. Applies from the next start.">
+              <select aria-label="Overlay" value={cfg.ui.overlay} onChange={(e) => save({ ui: { overlay: e.target.value as Config["ui"]["overlay"] } })}>
+                <option value="auto">Auto</option>
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </Row>
             <Row title="Log level" note="Daily files in the data folder, kept for 7 days.">
               <select aria-label="Log level" value={cfg.log.level} onChange={(e) => save({ log: { level: e.target.value } })}>
                 <option value="info">info</option>
