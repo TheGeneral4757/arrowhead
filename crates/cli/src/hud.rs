@@ -8,7 +8,7 @@ use arrowhead_core::time::Nanos;
 
 use crate::Res;
 
-fn load_png(p: &Path) -> Result<OwnedFrame, Box<dyn std::error::Error>> {
+pub(crate) fn load_png(p: &Path) -> Result<OwnedFrame, Box<dyn std::error::Error>> {
     let mut dec = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(p)?));
     dec.set_transformations(png::Transformations::EXPAND);
     let mut r = dec.read_info()?;

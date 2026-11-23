@@ -14,6 +14,7 @@ use clap::{Parser, Subcommand};
 mod detect;
 mod hud;
 mod latency;
+mod ocr;
 mod run;
 
 #[derive(Parser)]
@@ -102,6 +103,16 @@ enum Cmd {
         /// Ignore the colours saved in the profile and learn them again (skin change)
         #[arg(long)]
         relearn: bool,
+    },
+    /// Run the OCR teacher on screenshots (PNG): lines, rects and timing per variant
+    Ocr {
+        files: Vec<PathBuf>,
+        /// plain | lanczos | threshold | all
+        #[arg(long, default_value = "all")]
+        variant: String,
+        /// Model set name ("default" = bundled ocrs models)
+        #[arg(long, default_value = "default")]
+        model: String,
     },
     /// Teach the HUD glyph atlas from known text on screenshots, then find and read the HUD
     Hud {
@@ -244,6 +255,11 @@ fn main() -> ExitCode {
                 playfield,
             )
         }
+        Cmd::Ocr {
+            files,
+            variant,
+            model,
+        } => ocr::run(&files, &variant, &model),
         Cmd::Focus { seconds } => run::focus(seconds),
         Cmd::Bench { presses } => run::bench(presses),
         Cmd::Latency { trials } => {

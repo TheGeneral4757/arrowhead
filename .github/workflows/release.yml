@@ -53,14 +53,19 @@ jobs:
           npm --prefix ui run tauri build -- --no-bundle
           cargo build --release -p arrowhead-cli -p arrowhead-overlay
 
+      # Pinned by SHA-256 in the script (CC BY-SA 4.0 models, see THIRD_PARTY_NOTICES.md).
+      - name: Fetch OCR models
+        run: bash packaging/fetch-ocr-models.sh default target/ocr-models
+
       - name: Package
         env:
           VERSION: ${{ steps.v.outputs.version }}
         run: |
           name="arrowhead-${VERSION}-linux-x86_64"
           mkdir -p "dist/$name"
+          cp -r target/ocr-models "dist/$name/models"
           cp target/release/arrowhead target/release/arrowhead-cli target/release/arrowhead-overlay "dist/$name/"
-          cp LICENSE README.md packaging/arrowhead.desktop "dist/$name/"
+          cp LICENSE THIRD_PARTY_NOTICES.md README.md packaging/arrowhead.desktop "dist/$name/"
           mkdir "dist/$name/icons"
           cp crates/app/icons/32x32.png "dist/$name/icons/32.png"
           cp crates/app/icons/128x128.png "dist/$name/icons/128.png"
@@ -141,6 +146,11 @@ jobs:
       # tauri downloads); the zip is ours.
       # The overlay goes into the MSI as a sidecar (tauri.windows.conf.json), installed next to
       # arrowhead.exe, where the app looks for it.
+      # The OCR models ship in the MSI as Tauri resources (tauri.windows.conf.json), landing in
+      # <install dir>/models next to arrowhead.exe, where the OCR loader looks.
+      - name: Fetch OCR models
+        run: bash packaging/fetch-ocr-models.sh default target/ocr-models
+
       - name: Build app (MSI), cli and overlay
         run: |
           cargo build --release -p arrowhead-cli -p arrowhead-overlay
@@ -155,7 +165,8 @@ jobs:
           cp target/release/bundle/msi/*.msi "dist/$msi"
           name="arrowhead-${VERSION}-windows-x86_64"
           mkdir -p "dist/$name"
-          cp target/release/arrowhead.exe target/release/arrowhead-cli.exe target/release/arrowhead-overlay.exe LICENSE README.md "dist/$name/"
+          cp target/release/arrowhead.exe target/release/arrowhead-cli.exe target/release/arrowhead-overlay.exe LICENSE THIRD_PARTY_NOTICES.md README.md "dist/$name/"
+          cp -r target/ocr-models "dist/$name/models"
           (cd dist && powershell -NoProfile -Command "Compress-Archive -Path '$name' -DestinationPath '$zip'")
           echo "MSI=$msi" >> "$GITHUB_ENV"
           echo "ZIP=$zip" >> "$GITHUB_ENV"

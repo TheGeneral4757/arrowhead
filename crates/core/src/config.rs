@@ -235,6 +235,8 @@ pub struct Ui {
     pub minimise_while_playing: AutoOnOff,
     /// Read the game's HUD (readback, accuracy, counts). Off: plays on the saved offset only.
     pub hud_reader: bool,
+    /// OCR model set ("default" = the bundled ocrs models; others live in `models/<name>/`).
+    pub ocr_model: String,
 }
 
 impl Default for Ui {
@@ -243,6 +245,7 @@ impl Default for Ui {
             overlay: AutoOnOff::default(),
             minimise_while_playing: AutoOnOff::default(),
             hud_reader: true,
+            ocr_model: "default".into(),
         }
     }
 }
