@@ -21,6 +21,7 @@ type Snapshot = {
   /** Last 40 hits read back from the game, oldest first. */
   hits: Hit[];
   offset: number | null;
+  song: { title: string; difficulty: string } | null;
 };
 
 // Fast-changing data the canvas reads every frame without re-rendering React.
@@ -46,6 +47,7 @@ let snap: Snapshot = {
   stats: null,
   hits: [],
   offset: null,
+  song: null,
 };
 const subs = new Set<() => void>();
 function set(p: Partial<Snapshot>) {
@@ -91,6 +93,9 @@ function onBatch(batch: EngineEvent[]) {
         hits = [...(hits ?? snap.hits), { ms: e.ms, judgment: e.judgment }].slice(-40);
         p.offset = e.offset_ms;
         break;
+      case "Song":
+        p.song = { title: e.title, difficulty: e.difficulty };
+        break;
       case "Stats": {
         const { type: _t, ...st } = e;
         void _t;
@@ -127,7 +132,7 @@ export const engine = {
   async start(dryRun: boolean) {
     frame.dots = [];
     frame.planned = [];
-    set({ running: true, state: "Searching", dryRun, paused: false, error: null, pipeline: [], logs: [], hotkeys: null, layout: null, stats: null, hits: [], offset: null });
+    set({ running: true, state: "Searching", dryRun, paused: false, error: null, pipeline: [], logs: [], hotkeys: null, layout: null, stats: null, hits: [], offset: null, song: null });
     try {
       await api.startEngine(onBatch, dryRun);
     } catch (e) {

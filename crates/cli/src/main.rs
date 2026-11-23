@@ -174,6 +174,7 @@ fn parse_rect(s: &str) -> Result<Rect, String> {
 type Res = Result<(), Box<dyn std::error::Error>>;
 
 fn main() -> ExitCode {
+    arrowhead_ocr::limit_threads();
     let res = match Cli::parse().cmd {
         Cmd::Capture { seconds, region } => capture(seconds, region),
         Cmd::Record {

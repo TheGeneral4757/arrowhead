@@ -50,6 +50,19 @@ fn search_dirs(set: &str) -> Vec<PathBuf> {
     v
 }
 
+/// OCR threads at most (rten's default pool takes every core, which would compete with the
+/// game and the scan thread while a teaching pass runs).
+pub const THREADS: &str = "2";
+
+/// Caps rten's thread pool. Call first thing in `main`, before any thread exists: it sets an
+/// environment variable, which is only sound while the process is single-threaded.
+pub fn limit_threads() {
+    if std::env::var_os("RTEN_NUM_THREADS").is_none() {
+        // SAFETY: called at the top of main, before any other thread is started.
+        unsafe { std::env::set_var("RTEN_NUM_THREADS", THREADS) };
+    }
+}
+
 pub fn find_models(set: &str) -> Option<PathBuf> {
     search_dirs(set)
         .into_iter()

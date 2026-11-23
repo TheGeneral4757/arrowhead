@@ -192,7 +192,7 @@ export default function Live({ active }: { active: boolean }) {
     <section className="screen" aria-labelledby="h-live">
       <div className="screen-head">
         <div>
-          <h2 id="h-live">Live</h2>
+          <h2 id="h-live">{s.song ? `${s.song.title}${s.song.difficulty ? `, ${s.song.difficulty}` : ""}` : "Live"}</h2>
           <p>
             {scroll
               ? `Centre side, ${scroll}, scroll speed ${last && last.speed_px_ms > 0 ? `${last.speed_px_ms.toFixed(2)} px/ms` : "not fitted yet"}.`

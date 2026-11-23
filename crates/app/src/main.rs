@@ -807,6 +807,7 @@ async fn install_update(app: AppHandle, state: tauri::State<'_, AppState>) -> Cm
 }
 
 fn main() {
+    arrowhead_ocr::limit_threads();
     // A panic anywhere sets EXIT, which stops the engine and releases keys (S2); so do signals.
     install_exit_hooks();
     let cfg = load_config().unwrap_or_default();

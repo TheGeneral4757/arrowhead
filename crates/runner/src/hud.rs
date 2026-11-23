@@ -11,13 +11,14 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::time::{Duration, Instant, SystemTime};
 
 use arrowhead_core::adapt::{Bias, Class, Judged, MaxNote};
+use arrowhead_core::adapt::{PlayRecord, SongBook};
 use arrowhead_core::config::{
     HistoryEntry, HitHist, Profile, Windows, append_history, data_dir, load_toml, save_toml,
 };
 use arrowhead_core::event::{EngineEvent, Level, Stats};
 use arrowhead_core::frame::{AuxTap, OwnedFrame, Rect};
 use arrowhead_core::hud::readback::{Readback, SentPress};
-use arrowhead_core::hud::{Atlas, Counts, HudReader, Layout, Locations, StatsRead};
+use arrowhead_core::hud::{Atlas, Counts, Face, HudReader, Layout, Locations, StatsRead};
 use arrowhead_core::time::Nanos;
 
 use crate::{Tx, emit, log};
@@ -50,6 +51,8 @@ pub enum FromHud {
     Accuracy(f32),
     /// Per-lane and per-class press corrections, ms (`Planner::set_corrections`).
     Corrections([f64; 4], [f64; 3]),
+    /// The style's target accuracy for this song (its base plus the per-song adjust).
+    Target(f64),
 }
 
 pub struct HudSetup {
@@ -66,6 +69,8 @@ pub struct HudSetup {
     pub style: String,
     pub target: Option<f32>,
     pub seed: u64,
+    /// `ui.ocr_model`: the OCR model set that teaches the glyph reader and reads song titles.
+    pub ocr_model: String,
 }
 
 /// Every 8th frame: about 20 Hz at 165 Hz.
@@ -94,7 +99,22 @@ struct Song {
     max_note: MaxNote,
     /// Count-row label colours, learned from the counts panel (readouts use the same colours).
     label_rgb: Option<[[f32; 3]; 5]>,
+    /// The title still has to be read (song start).
+    title_wanted: bool,
+    /// From the title: `SongBook` key, name and difficulty.
+    key: Option<String>,
+    name: String,
+    difficulty: String,
 }
+
+/// A face knows every digit: OCR teaching can stop.
+fn knows_digits(rd: &HudReader, face: Face) -> bool {
+    let c = rd.atlas.chars(face);
+    "0123456789".chars().all(|d| c.contains(d))
+}
+
+/// Between OCR teaching passes, while a face still misses digits.
+const TEACH_EVERY: Duration = Duration::from_secs(3);
 
 /// Matched readbacks between correction updates sent to the planner.
 const CORRECT_EVERY: u32 = 10;
@@ -228,6 +248,27 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
     let mut requested: Vec<Rect> = vec![];
     let mut last_locate = Instant::now() - Duration::from_secs(10);
     let mut dirty_atlas = false;
+    let mut title_rect: Option<Rect> = s
+        .hud
+        .title
+        .map(|a| Rect::new(a[0], a[1], a[2].max(0) as u32, a[3].max(0) as u32));
+    let book_path = data_dir().map(|d| d.join("songs.json"));
+    let mut book = book_path.as_deref().map(SongBook::load).unwrap_or_default();
+    let style_id = s.style.to_lowercase();
+    let mut next_teach = Instant::now();
+    // OCR teaches the glyph reader and reads song titles; without its models the HUD still
+    // teaches itself, more slowly, and songs are not told apart.
+    let mut ocr = if tap.is_some() {
+        match crate::ocrwork::Worker::start(s.ocr_model.clone()) {
+            Ok(w) => Some(w),
+            Err(e) => {
+                log(&tx, Level::Warn, format!("OCR off: {e}"));
+                None
+            }
+        }
+    } else {
+        None
+    };
     if tap.is_none() {
         log(
             &tx,
@@ -261,6 +302,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                     song = Song {
                         started: Some(SystemTime::now()),
                         t0: Some(Instant::now()),
+                        title_wanted: ocr.is_some(),
                         ..Song::default()
                     };
                     // Each song starts with a fast average from the offset it ended on.
@@ -278,6 +320,15 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                     if !song.hit_errs.is_empty() {
                         save_bias(&s, rb.bias_ms, &tx);
                     }
+                    record_song(
+                        &mut book,
+                        book_path.as_deref(),
+                        &s,
+                        &style_id,
+                        &song,
+                        rb.bias_ms,
+                        &tx,
+                    );
                     song = Song::default();
                     if dirty_atlas
                         && let Some(p) = &atlas_path
@@ -308,8 +359,14 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
         // Ask for what we need: full frames until the stats, counts and our ms readout are
         // found, then just their rects.
         let l = rd.locs;
-        let known: Vec<Rect> = [l.stats, l.counts, l.ms].into_iter().flatten().collect();
-        let need_full = l.stats.is_none() || l.counts.is_none() || l.ms.is_none();
+        let known: Vec<Rect> = [l.stats, l.counts, l.ms, title_rect]
+            .into_iter()
+            .flatten()
+            .collect();
+        let need_full = l.stats.is_none()
+            || l.counts.is_none()
+            || l.ms.is_none()
+            || (ocr.is_some() && title_rect.is_none());
         let want = if need_full { vec![full] } else { known };
         if want != requested {
             tap.request(want.clone(), if need_full { EVERY_FULL } else { EVERY });
@@ -323,7 +380,22 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
             continue;
         };
 
-        if need_full && last_locate.elapsed() >= Duration::from_millis(400) {
+        if need_full
+            && let Some(w) = ocr.as_mut()
+            && !w.busy()
+            && last_locate.elapsed() >= Duration::from_secs(2)
+            && let Some(f) = holding(&frames, full)
+        {
+            last_locate = Instant::now();
+            let column = rd
+                .playfield
+                .map(|(a, b)| Rect::new(a, 0, (b - a).max(0) as u32, s.stream[1]));
+            w.offer(crate::ocrwork::Job::Locate {
+                frame: f.clone(),
+                column,
+            });
+        } else if need_full && ocr.is_none() && last_locate.elapsed() >= Duration::from_millis(400)
+        {
             last_locate = Instant::now();
             let before = rd.locs;
             let found = rd.locate(&frames[0].view());
@@ -338,6 +410,164 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
             };
             if rd.locs != before {
                 save_regions(&s, &rd.locs, &tx);
+            }
+        }
+        // OCR results.
+        if let Some(d) = ocr.as_mut().and_then(|w| w.poll()) {
+            use crate::ocrwork::Done;
+            match d {
+                Done::Lines(lines) => {
+                    let found = crate::ocrteach::locate(&lines, rd.playfield, s.stream[0]);
+                    let before = (rd.locs, title_rect);
+                    rd.locs.stats = rd.locs.stats.or(found.stats);
+                    rd.locs.counts = rd.locs.counts.or(found.counts);
+                    rd.locs.ms = rd.locs.ms.or(found.ms);
+                    title_rect = title_rect.or(found.title);
+                    if (rd.locs, title_rect) != before {
+                        save_regions_with_title(&s, &rd.locs, title_rect, &tx);
+                        log(
+                            &tx,
+                            Level::Info,
+                            format!(
+                                "HUD: found by OCR: stats {}, counts {}, our ms readout {}, title {}",
+                                yes(rd.locs.stats),
+                                yes(rd.locs.counts),
+                                yes(rd.locs.ms),
+                                yes(title_rect)
+                            ),
+                        );
+                    }
+                }
+                Done::Title(Some(t)) => {
+                    let (name, difficulty) = crate::ocrteach::title(&t);
+                    let key = SongBook::key(&t);
+                    let start =
+                        book.start_values(&key, &style_id, f64::from(s.target.unwrap_or(100.0)));
+                    if let Some(o) = start.offset_ms {
+                        let sign = rb.sign;
+                        rb = Readback::new(o);
+                        rb.sign = sign;
+                        let _ = out.send(FromHud::Offset(o));
+                    }
+                    song.applied = (start.lane_ms, start.class_ms);
+                    let _ = out.send(FromHud::Corrections(start.lane_ms, start.class_ms));
+                    if let Some(t) = s.target {
+                        let _ = out.send(FromHud::Target(f64::from(t) + start.target_adjust));
+                    }
+                    let plays = book.get(&key).map_or(0, |g| g.plays);
+                    log(
+                        &tx,
+                        Level::Info,
+                        match start.offset_ms {
+                            Some(o) if plays > 0 => format!(
+                                "song: {name} ({difficulty}), played {plays}x, starting at offset {o:+.1} ms"
+                            ),
+                            _ => format!("song: {name} ({difficulty}), first time"),
+                        },
+                    );
+                    emit(
+                        &tx,
+                        EngineEvent::Song {
+                            title: name.clone(),
+                            difficulty: difficulty.clone(),
+                        },
+                    );
+                    (song.key, song.name, song.difficulty) = (Some(key), name, difficulty);
+                }
+                Done::Title(None) => {}
+                Done::Teach {
+                    stats,
+                    counts,
+                    stats_frame,
+                    counts_frame,
+                } => {
+                    let (st, cn) = crate::ocrteach::trusted(&stats, &counts);
+                    let mut taught = 0;
+                    if let Some(r) = rd.locs.stats {
+                        let rows: [Option<String>; 7] = [
+                            st.accuracy.map(|v| format!("{v:.2}%")),
+                            st.highest_combo.map(|v| v.to_string()),
+                            st.combo.map(|v| v.to_string()),
+                            st.hits.map(|v| v.to_string()),
+                            st.misses.map(|v| v.to_string()),
+                            st.mean_ms.map(|v| format!("{v:.2}ms")),
+                            st.kps.map(|v| v.to_string()),
+                        ];
+                        for (i, v) in rows.iter().enumerate() {
+                            if let Some(v) = v {
+                                taught += rd.teach_row(&stats_frame.view(), Layout::Stats, r, i, v)
+                                    as u32;
+                            }
+                        }
+                    }
+                    if let Some(r) = rd.locs.counts {
+                        for (i, v) in [cn.sick, cn.good, cn.ok, cn.bad, cn.miss]
+                            .iter()
+                            .enumerate()
+                        {
+                            if let Some(v) = v {
+                                taught += rd.teach_row(
+                                    &counts_frame.view(),
+                                    Layout::Counts,
+                                    r,
+                                    i,
+                                    &v.to_string(),
+                                ) as u32;
+                            }
+                        }
+                    }
+                    if taught > 0 {
+                        dirty_atlas = true;
+                        log(
+                            &tx,
+                            Level::Info,
+                            format!(
+                                "HUD: OCR taught {taught} rows; stats font knows '{}'",
+                                rd.atlas.chars(Face::Stats)
+                            ),
+                        );
+                    }
+                }
+                Done::Ms {
+                    value: Some(v),
+                    frame,
+                    rect,
+                } => {
+                    if rd.teach_ms_at(&frame.view(), rect, v) {
+                        dirty_atlas = true;
+                        log(
+                            &tx,
+                            Level::Info,
+                            format!(
+                                "HUD: learned ms digits from {v:.2} ms; readout font knows '{}'",
+                                rd.atlas.chars(Face::Ms)
+                            ),
+                        );
+                    }
+                }
+                Done::Ms { value: None, .. } => {}
+            }
+        }
+        if let Some(w) = ocr.as_mut()
+            && !w.busy()
+        {
+            if song.title_wanted
+                && let Some(tr) = title_rect
+                && let Some(f) = holding(&frames, tr)
+            {
+                song.title_wanted = false;
+                w.offer(crate::ocrwork::Job::Title(f.view().crop(tr)));
+            } else if song.t0.is_some()
+                && !knows_digits(&rd, Face::Stats)
+                && next_teach <= Instant::now()
+                && let (Some(sr), Some(cr)) = (rd.locs.stats, rd.locs.counts)
+                && let (Some(sf), Some(cf)) = (holding(&frames, sr), holding(&frames, cr))
+            {
+                next_teach = Instant::now() + TEACH_EVERY;
+                w.offer(crate::ocrwork::Job::Teach {
+                    stats: sf.view().crop(sr),
+                    counts: cf.view().crop(cr),
+                });
             }
         }
         let l = rd.locs;
@@ -396,10 +626,16 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
             if !song.ms_taught
                 && st.hits == Some(1)
                 && let Some(m) = st.mean_ms
-                && let Some(f) = holding(&frames, full)
             {
                 song.ms_taught = true;
-                if rd.teach_ms_first_hit(&f.view(), m) {
+                // at the readout found by OCR, else searched for in our playfield
+                let kept = match rd.locs.ms.and_then(|r| Some((r, holding(&frames, r)?))) {
+                    Some((r, f)) => rd.teach_ms_at(&f.view(), r, m),
+                    None => {
+                        holding(&frames, full).is_some_and(|f| rd.teach_ms_first_hit(&f.view(), m))
+                    }
+                };
+                if kept {
                     dirty_atlas = true;
                     save_regions(&s, &rd.locs, &tx);
                     log(
@@ -427,7 +663,26 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
         if let Some(r) = rd.locs.ms
             && let Some(f) = holding(&frames, r)
         {
-            match rd.read_ms(&f.view(), r) {
+            let read = rd.read_ms(&f.view(), r);
+            // The readout font is missing digits and Hits just went up by one: Mean MS says what
+            // the readout shows (to its rounding), and OCR's reading of it can be checked.
+            if read.0.is_none()
+                && !read.1
+                && !knows_digits(&rd, Face::Ms)
+                && let (Some(p), Some(n)) = (prev.0, song.stats)
+                && let (Some(pm), Some(ph), Some(nm), Some(nh)) =
+                    (p.mean_ms, p.hits, n.mean_ms, n.hits)
+                && let Some((expected, tol)) = crate::ocrteach::hit_ms_from_mean(pm, ph, nm, nh)
+                && let Some(w) = ocr.as_mut()
+            {
+                w.offer(crate::ocrwork::Job::Ms {
+                    frame: f.view().crop(r),
+                    rect: r,
+                    expected,
+                    tol,
+                });
+            }
+            match read {
                 (_, true) => rb.on_blank(),
                 (Some(raw), _) if (raw * rb.sign).abs() <= s.windows.bad + 20.0 => {
                     if let Some(m) = rb.on_read(pts, raw, None, presses.make_contiguous()) {
@@ -525,6 +780,57 @@ fn handle_late(m: ToHud, s: &HudSetup, song: &mut Song, tx: &Tx) {
     }
 }
 
+fn yes(r: Option<Rect>) -> &'static str {
+    if r.is_some() { "yes" } else { "no" }
+}
+
+fn save_regions_with_title(s: &HudSetup, locs: &Locations, title: Option<Rect>, tx: &Tx) {
+    save_regions(s, locs, tx);
+    let Some(p) = &s.prof_path else { return };
+    if let Ok(mut prof) = load_toml::<Profile>(p) {
+        prof.hud.title = title.map(|r| [r.x, r.y, r.w as i32, r.h as i32]);
+        let _ = save_toml(p, &prof);
+    }
+}
+
+/// The play goes into the song's memory (`songs.json`): offset and corrections (when enough
+/// readbacks), the final accuracy for this style, and for Max the non-Sick judgments.
+fn record_song(
+    book: &mut SongBook,
+    path: Option<&std::path::Path>,
+    s: &HudSetup,
+    style_id: &str,
+    song: &Song,
+    bias_ms: f32,
+    tx: &Tx,
+) {
+    let (Some(key), Some(started)) = (&song.key, song.started) else {
+        return;
+    };
+    let when = rfc3339(started);
+    book.record_play(
+        key,
+        &PlayRecord {
+            name: &song.name,
+            difficulty: &song.difficulty,
+            when: &when,
+            readbacks: song.hit_errs.len() as u32,
+            offset_ms: bias_ms,
+            lane_ms: song.bias.lanes_ms(),
+            class_ms: song.bias.classes_ms(),
+            style: style_id,
+            target: f64::from(s.target.unwrap_or(100.0)),
+            final_accuracy: song.stats.and_then(|st| st.accuracy).map(f64::from),
+            max_note: (style_id == "max").then_some(song.max_note),
+        },
+    );
+    if let Some(p) = path
+        && let Err(e) = book.save(p)
+    {
+        log(tx, Level::Warn, format!("song memory not saved: {e}"));
+    }
+}
+
 /// Regions go into the profile's `[hud]`. The profile is reloaded first: the trail learner
 /// saves it too, and a stale copy would undo its colours.
 fn save_regions(s: &HudSetup, locs: &Locations, tx: &Tx) {
@@ -584,8 +890,8 @@ fn write_history(
         started: rfc3339(started),
         // the 3 s without notes that ended it are not part of the song
         duration_s: (t0.elapsed().as_secs_f32() - 3.0).max(0.0),
-        song: String::new(),
-        difficulty: String::new(),
+        song: song.name.clone(),
+        difficulty: song.difficulty.clone(),
         profile: s.profile.clone(),
         style: s.style.clone(),
         target: s.target,

@@ -25,8 +25,8 @@ use arrowhead_core::time::{Clock, RealClock};
 
 mod hud;
 pub mod latency;
-#[allow(dead_code)] // wired into the hud thread with the OCR crate
 mod ocrteach;
+mod ocrwork;
 pub mod platform;
 
 pub use platform::{live_sink, start_focus, start_hotkeys};
@@ -521,6 +521,7 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
             style: style_name,
             target: style_target,
             seed,
+            ocr_model: cfg.ui.ocr_model.clone(),
         },
         hud_rx,
         from_hud_tx,
@@ -756,6 +757,11 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
                 hud::FromHud::Offset(o) => eng.planner.cfg.offset_ms = f64::from(o),
                 hud::FromHud::Accuracy(a) => eng.planner.feed_accuracy(Some(f64::from(a))),
                 hud::FromHud::Corrections(l, c) => eng.planner.set_corrections(l, c),
+                hud::FromHud::Target(t) => {
+                    if let Some(p) = eng.planner.style_mut() {
+                        p.style.target = t.clamp(70.0, 100.0);
+                    }
+                }
             }
         }
 

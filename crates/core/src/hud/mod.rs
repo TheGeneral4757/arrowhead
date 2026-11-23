@@ -566,6 +566,11 @@ impl HudReader {
         let taught = (|| {
             let seg_row = self.seg.segment(f, r)?;
             let k = seg_row.label_len(lab.split(' ').count())?;
+            // A blank atlas (OCR teaching) has no label template yet: this row gives it.
+            if self.atlas.word(l.face(), lab).is_none() {
+                let (wb, war) = self.seg.word_bits(&seg_row, k)?;
+                self.atlas.add_word(l.face(), lab, k, wb, war);
+            }
             let cells = explode(&self.seg, &seg_row.cells[k..], &chars)?;
             for (c, &ch) in cells.iter().zip(&chars) {
                 self.atlas.add_glyph(l.face(), ch, c);
@@ -805,6 +810,19 @@ impl HudReader {
         if !ok {
             self.atlas = atlas;
             self.locs = locs;
+        }
+        ok
+    }
+
+    /// Teach the ms readout at `r` from the value it shows (confirmed elsewhere, e.g. against
+    /// Mean MS); kept only if it then reads back as `ms` there. Returns whether it was kept.
+    pub fn teach_ms_at(&mut self, f: &FrameView, r: Rect, ms: f32) -> bool {
+        let backup = self.atlas.clone();
+        let text = format!("{ms:.2}ms");
+        let ok = self.teach_lines(f, Face::Ms, &[&text], Some(r)).is_ok()
+            && self.read_ms(f, r).0 == Some(ms);
+        if !ok {
+            self.atlas = backup;
         }
         ok
     }

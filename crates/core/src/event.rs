@@ -177,6 +177,11 @@ pub enum EngineEvent {
     },
     /// Song totals from the HUD and readback, about twice a second while playing.
     Stats(Stats),
+    /// The song's title, read by OCR at its start.
+    Song {
+        title: String,
+        difficulty: String,
+    },
     /// The engine stopped; `error` is set when it stopped on an error.
     Stopped {
         error: Option<String>,

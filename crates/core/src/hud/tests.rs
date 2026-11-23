@@ -416,3 +416,22 @@ fn teach_row_learns_a_digit_and_refuses_a_wrong_one() {
     assert!(!rd.teach_row(&one.view(), Layout::Stats, stats, 2, "0"));
     assert_eq!(rd.atlas.to_bytes(), before);
 }
+
+#[test]
+fn teach_ms_at_a_known_rect() {
+    let mut rd = HudReader::new(Atlas::default(), 0.25);
+    rd.playfield = Some(OURS);
+    let f = scene(
+        &TEACH_STATS[0],
+        &TEACH_COUNTS[0],
+        Some("-12.34ms"),
+        ["0", "0"],
+    );
+    let r = Rect::new(OURS.0, 380, (OURS.1 - OURS.0) as u32, 60);
+    assert!(rd.teach_ms_at(&f.view(), r, -12.34));
+    assert_eq!(rd.read_ms(&f.view(), r).0, Some(-12.34));
+    // a value the readout does not show is refused and leaves the atlas as it was
+    let before = rd.atlas.to_bytes();
+    assert!(!rd.teach_ms_at(&f.view(), r, -21.43));
+    assert_eq!(rd.atlas.to_bytes(), before);
+}

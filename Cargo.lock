@@ -134,6 +134,7 @@ version = "0.1.0"
 dependencies = [
  "arrowhead-capture",
  "arrowhead-core",
+ "arrowhead-ocr",
  "arrowhead-runner",
  "png",
  "serde",
@@ -233,6 +234,8 @@ version = "0.1.0"
 dependencies = [
  "arrowhead-core",
  "arrowhead-input",
+ "arrowhead-ocr",
+ "png",
  "serde",
 ]
 

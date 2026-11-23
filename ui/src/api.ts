@@ -39,6 +39,7 @@ export type EngineEvent =
   | { type: "Log"; level: "info" | "warn" | "error"; text: string }
   | { type: "Readback"; ms: number; judgment: Judgment; offset_ms: number }
   | ({ type: "Stats" } & GameStats)
+  | { type: "Song"; title: string; difficulty: string }
   | { type: "Stopped"; error: string | null };
 
 /** HUD totals for the song (spec 07, Stats). `counts`: Sick, Good, Ok, Bad, Miss. `null` = not readable yet. */
@@ -88,7 +89,7 @@ export type Config = {
     accuracy_weights: { sick: number; good: number; ok: number; bad: number; miss: number };
     readback_sign: number;
   };
-  ui: { overlay: AutoOnOff; minimise_while_playing: AutoOnOff; hud_reader: boolean };
+  ui: { overlay: AutoOnOff; minimise_while_playing: AutoOnOff; hud_reader: boolean; ocr_model: string };
   updates: { check: boolean };
   log: { level: string; per_note: boolean };
 };

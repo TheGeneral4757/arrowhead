@@ -30,31 +30,55 @@ fn norm_label(s: &str) -> String {
     s.chars()
         .map(|c| match c.to_ascii_uppercase() {
             '5' | '$' => 'S',
-            '(' | ')' | '|' | '1' | '!' | 'L' if c != 'L' => 'I',
+            '(' | ')' | '|' | '1' | 'l' => 'I',
             u => u,
         })
         .collect()
 }
 
-/// The text after `label` on the line whose start reads as `label` (not a longer word:
-/// MISS is not MISSES), in the line's own characters.
+/// Edit distance, for short labels only.
+fn edits(a: &[u8], b: &[u8]) -> usize {
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, &x) in a.iter().enumerate() {
+        let mut cur = vec![i + 1];
+        for (j, &y) in b.iter().enumerate() {
+            cur.push(
+                (prev[j] + usize::from(x != y))
+                    .min(prev[j + 1] + 1)
+                    .min(cur[j] + 1),
+            );
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+/// The text after `label` on the line that starts with it, allowing OCR one wrong, missing or
+/// extra letter for labels of 3+ letters (`"ITS` is HITS, `MMEAN MS` is MEAN MS). A letter
+/// right after the label means a longer word (MISS is not MISSES).
 fn after<'a>(lines: &'a Lines, label: &str) -> Option<(&'a str, Rect)> {
     lines.iter().find_map(|(t, r)| {
         if !t.is_ascii() {
             return None;
         }
-        let lead = t.len() - t.trim_start().len();
+        // OCR adds stray marks before a line (a quote, a dot)
+        let lead = t.len()
+            - t.trim_start_matches(|c: char| !c.is_ascii_alphanumeric())
+                .len();
         let n = norm_label(&t[lead..]);
-        let next = n[label.len().min(n.len())..].chars().next();
-        (n.starts_with(label) && !next.is_some_and(|c| c.is_ascii_alphabetic()))
-            .then(|| (&t[lead + label.len()..], *r))
+        let slack = usize::from(label.len() >= 3);
+        (label.len().saturating_sub(slack)..=label.len() + slack)
+            .filter(|&k| k <= n.len())
+            .filter(|&k| !n[k..].starts_with(|c: char| c.is_ascii_alphabetic()))
+            .find(|&k| edits(&n.as_bytes()[..k], label.as_bytes()) <= slack)
+            .map(|k| (&t[lead + k..], *r))
     })
 }
 
 /// Value text with digit look-alikes repaired; `None` if anything else is in it.
 fn digits(rest: &str) -> Option<String> {
     let v: Option<String> = rest
-        .trim_start_matches([':', ';', ' ', '.', '?', '\''])
+        .trim_start_matches([':', ';', ' ', '.', '?', '\'', '!'])
         .chars()
         .filter(|c| !c.is_whitespace())
         .map(repair)
@@ -253,14 +277,46 @@ pub fn ms_value(t: &str) -> Option<f32> {
 
 pub fn locate(lines: &Lines, playfield: Option<(i32, i32)>, stream_w: u32) -> Found {
     let rows = |labels: &[&str]| {
-        let rs: Vec<Rect> = labels
+        // Every line that reads as one of the labels (the FPS counter can read as KPS, so not
+        // just the first), with the label it matched.
+        let mut rs: Vec<(Rect, usize)> = lines
             .iter()
-            .filter_map(|l| after(lines, l).map(|x| x.1))
+            .filter_map(|line| {
+                let one = std::slice::from_ref(line);
+                labels
+                    .iter()
+                    .position(|l| after(one, l).is_some())
+                    .map(|i| (line.1, i))
+            })
             .collect();
+        rs.sort_by_key(|r| r.0.y);
+        // One panel: the longest run of rows each within 5 row heights of the one above (two
+        // rows OCR could not read leave a gap).
+        let (mut best, mut start) = ((0, 0), 0);
+        for i in 1..=rs.len() {
+            if i == rs.len() || rs[i].0.y - rs[i - 1].0.y > 5 * rs[i - 1].0.h as i32 {
+                if i - start > best.1 - best.0 {
+                    best = (start, i);
+                }
+                start = i;
+            }
+        }
+        let mut run: Vec<(Rect, usize)> = rs[best.0..best.1].to_vec();
+        // and left-aligned: a judgment popup at the same height ("GOOD!") is not a row
+        if let Some(h) = run.first().map(|r| r.0.h as i32) {
+            let mut xs: Vec<i32> = run.iter().map(|r| r.0.x).collect();
+            xs.sort_unstable();
+            let mid = xs[xs.len() / 2];
+            run.retain(|r| (r.0.x - mid).abs() <= 3 * h);
+        }
+        let mut seen: Vec<usize> = run.iter().map(|r| r.1).collect();
+        seen.sort_unstable();
+        seen.dedup();
+        let rects: Vec<Rect> = run.iter().map(|r| r.0).collect();
         // most rows must be seen, else it is some other text
-        let row_h = rs.first().map_or(0, |r| r.h);
-        (rs.len() * 3 >= labels.len() * 2)
-            .then(|| union(&rs).map(|u| padded(u, row_h / 2)))
+        let row_h = rects.first().map_or(0, |r| r.h);
+        (seen.len() * 3 >= labels.len() * 2)
+            .then(|| union(&rects).map(|u| padded(u, row_h / 2)))
             .flatten()
     };
     let stats = rows(&[
@@ -272,12 +328,16 @@ pub fn locate(lines: &Lines, playfield: Option<(i32, i32)>, stream_w: u32) -> Fo
         "KPS",
     ]);
     let counts = rows(&["SICK", "GOOD", "OK", "BAD", "MISS"]);
+    // Where our readout is: a line in our playfield ending in "ms" with digits before it. Its
+    // thin font often defeats OCR's digits ("731MS" for 78.71), but not its position.
     let ms = lines
         .iter()
         .filter(|(t, r)| {
             let c = r.x + r.w as i32 / 2;
-            !norm_label(t).contains("MEAN")
-                && ms_value(t).is_some()
+            let up = t.to_uppercase();
+            !up.contains("MEAN")
+                && (up.trim_end().ends_with("MS") || up.trim_end().ends_with("M5"))
+                && t.chars().filter(char::is_ascii_digit).count() >= 2
                 && playfield.is_some_and(|(a, b)| (a..=b).contains(&c))
         })
         .map(|(_, r)| padded(*r, r.h / 2))
@@ -473,9 +533,9 @@ mod tests {
             (c.sick, c.good, c.ok, c.bad),
             (Some(85), Some(61), Some(47), Some(26))
         );
-        // Misses read 70 / 170 and Miss 70 / 170, once each: 70 = 70 and 170 = 170 tie, so
-        // neither is trusted until a pass settles it.
-        assert_eq!((s.misses, c.miss), (None, None));
+        // Misses read 70 / 170; Miss reads 70, 170 ("MIS: 170", one letter short) and 170:
+        // 170 = 170 has the most passes behind it.
+        assert_eq!((s.misses, c.miss), (Some(170), Some(170)));
     }
 
     #[test]
@@ -546,6 +606,41 @@ mod tests {
     }
 
     #[test]
+    fn labels_survive_ocr_damage() {
+        // full-frame OCR lines from the user's frame (s88)
+        let lines: Vec<(String, Rect)> = [
+            "ACCURACY: 52 ?4%",
+            "HIGHEST COMBO: 27",
+            "OMBO:",
+            "\"ITS: 219",
+            "MISSES: 170",
+            "MMEAN MS: 2742 MS",
+            "P5: 18",
+            "SICK 85",
+            "GOOD!: 61",
+            "OR? 47",
+            "BAD: 24",
+            "M155:70",
+        ]
+        .iter()
+        .enumerate()
+        .map(|(i, t)| l(t, i as i32 * 40))
+        .collect();
+        let s = stats(&lines);
+        assert_eq!((s.hits, s.misses, s.kps), (Some(219), Some(170), Some(18)));
+        let c = counts(&lines);
+        assert_eq!(
+            (c.sick, c.good, c.bad, c.miss),
+            (Some(85), Some(61), Some(24), Some(70))
+        );
+        assert_eq!(c.ok, None, "OK is 2 letters: no slack, OR is not OK");
+        assert!(
+            after(&lines, "MISS").is_some_and(|(_, r)| r.y == 11 * 40),
+            "not the MISSES row"
+        );
+    }
+
+    #[test]
     fn finds_elements_and_title() {
         let lines = vec![
             (
@@ -563,7 +658,7 @@ mod tests {
             ("OK: 47".to_string(), Rect::new(2290, 730, 90, 24)),
             ("BAD: 26".to_string(), Rect::new(2290, 770, 90, 24)),
             ("MISS: 170".to_string(), Rect::new(2290, 810, 110, 24)),
-            ("72.71 mS".to_string(), Rect::new(1200, 785, 150, 22)),
+            ("731MS".to_string(), Rect::new(1204, 786, 148, 16)),
             ("-141.65 ms".to_string(), Rect::new(2090, 785, 190, 22)),
         ];
         let f = locate(&lines, Some((870, 1690)), 2560);
