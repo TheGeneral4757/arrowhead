@@ -755,6 +755,7 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
             match m {
                 hud::FromHud::Offset(o) => eng.planner.cfg.offset_ms = f64::from(o),
                 hud::FromHud::Accuracy(a) => eng.planner.feed_accuracy(Some(f64::from(a))),
+                hud::FromHud::Corrections(l, c) => eng.planner.set_corrections(l, c),
             }
         }
 
@@ -829,6 +830,7 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
                         sent: actual,
                         lane,
                         intended_ms: eng.planner.intended_err(id),
+                        class: eng.planner.class_of(id),
                     });
                     emit(
                         &tx,

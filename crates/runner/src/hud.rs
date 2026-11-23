@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::time::{Duration, Instant, SystemTime};
 
+use arrowhead_core::adapt::{Bias, Class, Judged, MaxNote};
 use arrowhead_core::config::{
     HistoryEntry, HitHist, Profile, Windows, append_history, data_dir, load_toml, save_toml,
 };
@@ -28,6 +29,8 @@ pub enum ToHud {
         sent: Nanos,
         lane: u8,
         intended_ms: f32,
+        /// Single, chord or jack, as the planner classed the note (spec 04, adaptation).
+        class: Class,
     },
     /// Notes are approaching: a song started (counters read zero now).
     SongStart,
@@ -45,6 +48,8 @@ pub enum FromHud {
     Offset(f32),
     /// Accuracy the game shows, percent, for the controller.
     Accuracy(f32),
+    /// Per-lane and per-class press corrections, ms (`Planner::set_corrections`).
+    Corrections([f64; 4], [f64; 3]),
 }
 
 pub struct HudSetup {
@@ -82,6 +87,26 @@ struct Song {
     hit_errs: Vec<f32>,
     ms_taught: bool,
     zeros_taught: bool,
+    /// Per-lane and per-class timing errors this song, and the corrections now applied.
+    bias: Bias,
+    applied: ([f64; 4], [f64; 3]),
+    /// Non-Sick judgments by lane and class (kept for Max plays).
+    max_note: MaxNote,
+    /// Count-row label colours, learned from the counts panel (readouts use the same colours).
+    label_rgb: Option<[[f32; 3]; 5]>,
+}
+
+/// Matched readbacks between correction updates sent to the planner.
+const CORRECT_EVERY: u32 = 10;
+
+fn bump(j: &mut Judged, judgment: &str) {
+    match judgment {
+        "good" => j.good += 1,
+        "ok" => j.ok += 1,
+        "bad" => j.bad += 1,
+        "miss" => j.miss += 1,
+        _ => {}
+    }
 }
 
 /// The press that the counter tick between two HUD reads must come from: exactly one press
@@ -196,6 +221,8 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
     let mut rb = Readback::new(s.offset_ms);
     rb.sign = s.readback_sign;
     let mut presses: VecDeque<SentPress> = VecDeque::with_capacity(64);
+    // The class of each press in `presses`, same order.
+    let mut classes: VecDeque<Class> = VecDeque::with_capacity(64);
     let mut song = Song::default();
     let (mut seq, mut last_pts, mut last_stats_at) = (0u64, Nanos(0), Instant::now());
     let mut requested: Vec<Rect> = vec![];
@@ -217,10 +244,13 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                     sent,
                     lane,
                     intended_ms,
+                    class,
                 }) => {
                     if presses.len() == presses.capacity() {
                         presses.pop_front();
+                        classes.pop_front();
                     }
+                    classes.push_back(class);
                     presses.push_back(SentPress {
                         sent,
                         lane,
@@ -233,6 +263,11 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                         t0: Some(Instant::now()),
                         ..Song::default()
                     };
+                    // Each song starts with a fast average from the offset it ended on.
+                    let sign = rb.sign;
+                    rb = Readback::new(rb.bias_ms);
+                    rb.sign = sign;
+                    let _ = out.send(FromHud::Corrections([0.0; 4], [0.0; 3]));
                 }
                 Ok(ToHud::SongOver {
                     offset_ms,
@@ -383,6 +418,9 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
             && let Some(f) = holding(&frames, r)
         {
             song.counts = Some(rd.read_counts(&f.view(), r));
+            if song.label_rgb.is_none() {
+                song.label_rgb = crate::ocrteach::label_colours(&f.view(), r);
+            }
         }
 
         // Readback.
@@ -394,11 +432,39 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                 (Some(raw), _) if (raw * rb.sign).abs() <= s.windows.bad + 20.0 => {
                     if let Some(m) = rb.on_read(pts, raw, None, presses.make_contiguous()) {
                         song.hit_errs.push(m.hit_error_ms);
-                        let judgment = match (prev.1, song.counts) {
-                            (Some(a), Some(b)) => judged(&a, &b),
-                            _ => None,
+                        // The readout is drawn in its judgment's colour; else the count that went
+                        // up; else the (unverified) windows.
+                        let by_colour = song.label_rgb.and_then(|labels| {
+                            let c = crate::ocrteach::text_colour(&f.view(), r)?;
+                            crate::ocrteach::judgment_by_colour(c, &labels)
+                        });
+                        let judgment = by_colour
+                            .map(|i| ["sick", "good", "ok", "bad", "miss"][i])
+                            .or_else(|| match (prev.1, song.counts) {
+                                (Some(a), Some(b)) => judged(&a, &b),
+                                _ => None,
+                            })
+                            .unwrap_or_else(|| by_windows(&s.windows, m.hit_error_ms));
+                        // Per-lane and per-pattern bias, from the error as it would have been
+                        // without the corrections in force (else they cancel themselves).
+                        let lane = presses[m.press].lane;
+                        let class = classes.get(m.press).copied().unwrap_or(Class::Single);
+                        let (al, ac) = song.applied;
+                        song.bias.add(
+                            lane,
+                            class,
+                            f64::from(m.hit_error_ms - m.intended_err_ms)
+                                + al[lane as usize & 3]
+                                + ac[class as usize],
+                        );
+                        if song.bias.samples().is_multiple_of(CORRECT_EVERY) {
+                            song.applied = (song.bias.lanes_ms(), song.bias.classes_ms());
+                            let _ = out.send(FromHud::Corrections(song.applied.0, song.applied.1));
                         }
-                        .unwrap_or_else(|| by_windows(&s.windows, m.hit_error_ms));
+                        if judgment != "sick" {
+                            bump(&mut song.max_note.lane[lane as usize & 3], judgment);
+                            bump(&mut song.max_note.class[class as usize], judgment);
+                        }
                         let _ = out.send(FromHud::Offset(m.bias_ms));
                         emit(
                             &tx,

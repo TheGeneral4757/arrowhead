@@ -334,6 +334,43 @@ pub fn confirm_ms(cands: &[f32], expected: f32, tol: f32) -> Option<f32> {
     fit.all(|c| (c - first).abs() < 0.005).then_some(first)
 }
 
+/// Mean colour of the saturated bright pixels in `r` (coloured text; the white of values and
+/// the dark outline are left out). `None` with too few such pixels.
+pub fn text_colour(f: &arrowhead_core::frame::FrameView, r: Rect) -> Option<[f32; 3]> {
+    let r = f.region.intersect(&r)?;
+    let (mut sum, mut n) = ([0f32; 3], 0u32);
+    for y in r.y..r.y + r.h as i32 {
+        for x in r.x..r.x + r.w as i32 {
+            let (cr, cg, cb) = f.px(x, y);
+            let (hi, lo) = (cr.max(cg).max(cb), cr.min(cg).min(cb));
+            if hi > 140 && hi - lo > 60 {
+                sum[0] += cr as f32;
+                sum[1] += cg as f32;
+                sum[2] += cb as f32;
+                n += 1;
+            }
+        }
+    }
+    (n >= 30).then(|| sum.map(|v| v / n as f32))
+}
+
+/// The five count-row label colours (Sick..Miss): the stack split into five equal bands, left
+/// half of each (the label; values can be white).
+pub fn label_colours(f: &arrowhead_core::frame::FrameView, counts: Rect) -> Option<[[f32; 3]; 5]> {
+    let band = counts.h / 5;
+    let mut out = [[0f32; 3]; 5];
+    for (i, o) in out.iter_mut().enumerate() {
+        let r = Rect::new(
+            counts.x,
+            counts.y + (i as u32 * band) as i32,
+            counts.w / 2,
+            band,
+        );
+        *o = text_colour(f, r)?;
+    }
+    Some(out)
+}
+
 /// Judgment index (0 Sick .. 4 Miss) of a readout drawn in the judgment's colour: the
 /// count-row label colour nearest to `rgb` (each learned from the counts panel). `None`
 /// when no label is clearly nearest.
