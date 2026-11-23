@@ -25,6 +25,8 @@ use arrowhead_core::time::{Clock, RealClock};
 
 mod hud;
 pub mod latency;
+#[allow(dead_code)] // wired into the hud thread with the OCR crate
+mod ocrteach;
 pub mod platform;
 
 pub use platform::{live_sink, start_focus, start_hotkeys};
