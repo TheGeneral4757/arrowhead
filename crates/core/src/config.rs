@@ -431,6 +431,11 @@ pub struct HistoryEntry {
     /// Hit-error histogram for the History page; absent on rows without hit errors.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hit_hist: Option<HitHist>,
+    /// From the results screen; absent when it was not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_notes: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highest_combo: Option<u32>,
 }
 
 /// `counts[i]` holds hit errors in `[from_ms + i * bin_ms, from_ms + (i + 1) * bin_ms)`.
@@ -631,6 +636,8 @@ mod tests {
             watchdog_releases: 0,
             seed: 1,
             hit_hist: None,
+            total_notes: None,
+            highest_combo: None,
         };
         append_history(&p, &e).unwrap();
         let e2 = HistoryEntry {
@@ -640,8 +647,14 @@ mod tests {
                 bin_ms: 10.0,
                 counts: vec![0, 3, 1],
             }),
+            total_notes: Some(727),
+            highest_combo: Some(69),
             ..e.clone()
         };
+        // rows written before the results fields still parse
+        let old = serde_json::to_string(&e).unwrap();
+        assert!(!old.contains("total_notes"));
+        assert_eq!(serde_json::from_str::<HistoryEntry>(&old).unwrap(), e);
         append_history(&p, &e2).unwrap();
         let text = fs::read_to_string(&p).unwrap();
         let lines: Vec<_> = text.lines().collect();

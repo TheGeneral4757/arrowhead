@@ -6,7 +6,7 @@
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
 
 use arrowhead_core::frame::{OwnedFrame, Rect};
-use arrowhead_core::hud::{Counts, StatsRead};
+use arrowhead_core::hud::{Counts, ResultsRead, StatsRead};
 use arrowhead_ocr::{Ocr, Variant};
 
 use crate::ocrteach;
@@ -34,6 +34,8 @@ pub enum Job {
     },
     /// Read the song title line.
     Title(OwnedFrame),
+    /// Read the results screen ("Stats from Last Song") on a full frame.
+    Results(OwnedFrame),
 }
 
 pub enum Done {
@@ -50,6 +52,7 @@ pub enum Done {
         rect: Rect,
     },
     Title(Option<String>),
+    Results(Option<ResultsRead>),
 }
 
 pub struct Worker {
@@ -156,6 +159,26 @@ fn run(ocr: &Ocr, job: Job) -> Done {
                 rect,
             }
         }
+        Job::Results(f) => {
+            // a pass costs a second on a full frame: stop at the first that is enough, then
+            // read the counts column again on its own (its digits are lost in the full pass)
+            let mut passes = vec![];
+            for &v in &VARIANTS {
+                passes.push(ocr.lines(&f.view(), v));
+                if let Some(r) = ocrteach::results(&passes) {
+                    return Done::Results(Some(r));
+                }
+            }
+            let panel = passes
+                .iter()
+                .find_map(|p| ocrteach::results_panel(p))
+                .and_then(|r| f.region.intersect(&r));
+            if let Some(c) = panel {
+                let col = f.view().crop(c);
+                passes.extend(VARIANTS.iter().map(|&v| ocr.lines(&col.view(), v)));
+            }
+            Done::Results(ocrteach::results(&passes))
+        }
         Job::Title(f) => Done::Title(
             ocr.lines(&f.view(), Variant::Plain2x)
                 .into_iter()
@@ -200,6 +223,25 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
+    }
+
+    #[test]
+    fn ocr_reads_a_results_screen() {
+        let (Some(p), true) = (
+            std::env::var_os("ARROWHEAD_TEST_RESULTS"),
+            arrowhead_ocr::find_models("default").is_some(),
+        ) else {
+            eprintln!("skipped: set ARROWHEAD_TEST_RESULTS to a results screenshot");
+            return;
+        };
+        let frame = load_png(std::path::Path::new(&p)).unwrap();
+        let mut w = Worker::start("default".into()).unwrap();
+        assert!(w.offer(Job::Results(frame)));
+        let Done::Results(r) = wait(&mut w) else {
+            panic!()
+        };
+        eprintln!("results {r:?}");
+        assert!(r.is_some());
     }
 
     #[test]

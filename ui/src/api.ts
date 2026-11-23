@@ -165,6 +165,9 @@ export type HistoryEntry = {
   watchdog_releases: number;
   seed: number;
   hit_hist?: { from_ms: number; bin_ms: number; counts: number[] };
+  /** From the results screen; absent when it was not read. */
+  total_notes?: number;
+  highest_combo?: number;
 };
 export type UpdateInfo = { version: string; notes: string | null; can_install: boolean };
 

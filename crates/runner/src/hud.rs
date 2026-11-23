@@ -18,7 +18,9 @@ use arrowhead_core::config::{
 use arrowhead_core::event::{EngineEvent, Level, Stats};
 use arrowhead_core::frame::{AuxTap, OwnedFrame, Rect};
 use arrowhead_core::hud::readback::{Readback, SentPress};
-use arrowhead_core::hud::{Atlas, Counts, Face, HudReader, Layout, Locations, StatsRead};
+use arrowhead_core::hud::{
+    Atlas, Counts, Face, HudReader, Layout, Locations, ResultsRead, StatsRead,
+};
 use arrowhead_core::time::Nanos;
 
 use crate::{Tx, emit, log};
@@ -105,6 +107,21 @@ struct Song {
     key: Option<String>,
     name: String,
     difficulty: String,
+}
+
+/// How long after a song the results screen is waited for, and how often it is read.
+const RESULTS_WAIT: Duration = Duration::from_secs(10);
+const RESULTS_EVERY: Duration = Duration::from_secs(1);
+
+/// A song that is over but whose history row waits for the results screen (spec 03).
+struct PendingResults {
+    song: Song,
+    offset_ms: f32,
+    engine_missed: u32,
+    watchdog: u32,
+    bias_ms: f32,
+    ended: Instant,
+    last_try: Instant,
 }
 
 /// A face knows every digit: OCR teaching can stop.
@@ -244,6 +261,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
     // The class of each press in `presses`, same order.
     let mut classes: VecDeque<Class> = VecDeque::with_capacity(64);
     let mut song = Song::default();
+    let mut pending: Option<PendingResults> = None;
     let (mut seq, mut last_pts, mut last_stats_at) = (0u64, Nanos(0), Instant::now());
     let mut requested: Vec<Rect> = vec![];
     let mut last_locate = Instant::now() - Duration::from_secs(10);
@@ -299,6 +317,14 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                     });
                 }
                 Ok(ToHud::SongStart) => {
+                    if let Some(p) = pending.take() {
+                        log(
+                            &tx,
+                            Level::Info,
+                            "results screen: next song began, using the last live reading",
+                        );
+                        finish_song(&mut book, book_path.as_deref(), &s, &style_id, p, None, &tx);
+                    }
                     song = Song {
                         started: Some(SystemTime::now()),
                         t0: Some(Instant::now()),
@@ -316,20 +342,42 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                     engine_missed,
                     watchdog,
                 }) => {
-                    write_history(&s, &song, offset_ms, engine_missed, watchdog, &tx);
                     if !song.hit_errs.is_empty() {
                         save_bias(&s, rb.bias_ms, &tx);
                     }
-                    record_song(
-                        &mut book,
-                        book_path.as_deref(),
-                        &s,
-                        &style_id,
-                        &song,
-                        rb.bias_ms,
-                        &tx,
-                    );
-                    song = Song::default();
+                    let done = PendingResults {
+                        song: std::mem::take(&mut song),
+                        offset_ms,
+                        engine_missed,
+                        watchdog,
+                        bias_ms: rb.bias_ms,
+                        ended: Instant::now(),
+                        last_try: Instant::now() - RESULTS_EVERY,
+                    };
+                    if ocr.is_some() {
+                        // the row waits for the results screen's exact numbers
+                        if let Some(old) = pending.replace(done) {
+                            finish_song(
+                                &mut book,
+                                book_path.as_deref(),
+                                &s,
+                                &style_id,
+                                old,
+                                None,
+                                &tx,
+                            );
+                        }
+                    } else {
+                        finish_song(
+                            &mut book,
+                            book_path.as_deref(),
+                            &s,
+                            &style_id,
+                            done,
+                            None,
+                            &tx,
+                        );
+                    }
                     if dirty_atlas
                         && let Some(p) = &atlas_path
                         && rd.atlas.save(p).is_ok()
@@ -339,12 +387,27 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
+                    if let Some(p) = pending.take() {
+                        finish_song(&mut book, book_path.as_deref(), &s, &style_id, p, None, &tx);
+                    }
                     if dirty_atlas && let Some(p) = &atlas_path {
                         let _ = rd.atlas.save(p);
                     }
                     return;
                 }
             }
+        }
+        if pending
+            .as_ref()
+            .is_some_and(|p| p.ended.elapsed() >= RESULTS_WAIT)
+        {
+            let p = pending.take().expect("checked");
+            log(
+                &tx,
+                Level::Info,
+                "results screen not read: using the last live reading",
+            );
+            finish_song(&mut book, book_path.as_deref(), &s, &style_id, p, None, &tx);
         }
         let Some(tap) = &tap else {
             // No HUD: still write history rows (without the game's numbers).
@@ -366,7 +429,8 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
         let need_full = l.stats.is_none()
             || l.counts.is_none()
             || l.ms.is_none()
-            || (ocr.is_some() && title_rect.is_none());
+            || (ocr.is_some() && title_rect.is_none())
+            || pending.is_some();
         let want = if need_full { vec![full] } else { known };
         if want != requested {
             tap.request(want.clone(), if need_full { EVERY_FULL } else { EVERY });
@@ -546,7 +610,35 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                     }
                 }
                 Done::Ms { value: None, .. } => {}
+                Done::Results(Some(r)) => {
+                    if let Some(p) = pending.take() {
+                        log(
+                            &tx,
+                            Level::Info,
+                            "results screen read: history row uses its numbers",
+                        );
+                        finish_song(
+                            &mut book,
+                            book_path.as_deref(),
+                            &s,
+                            &style_id,
+                            p,
+                            Some(r),
+                            &tx,
+                        );
+                    }
+                }
+                Done::Results(None) => {}
             }
+        }
+        if let Some(p) = pending.as_mut()
+            && let Some(w) = ocr.as_mut()
+            && !w.busy()
+            && p.last_try.elapsed() >= RESULTS_EVERY
+            && let Some(f) = holding(&frames, full)
+        {
+            p.last_try = Instant::now();
+            w.offer(crate::ocrwork::Job::Results(f.clone()));
         }
         if let Some(w) = ocr.as_mut()
             && !w.busy()
@@ -773,7 +865,16 @@ fn handle_late(m: ToHud, s: &HudSetup, song: &mut Song, tx: &Tx) {
             watchdog,
             ..
         } => {
-            write_history(s, song, offset_ms, engine_missed, watchdog, tx);
+            write_history(
+                s,
+                song,
+                offset_ms,
+                engine_missed,
+                watchdog,
+                Instant::now(),
+                None,
+                tx,
+            );
             *song = Song::default();
         }
         ToHud::Press { .. } => {}
@@ -791,6 +892,36 @@ fn save_regions_with_title(s: &HudSetup, locs: &Locations, title: Option<Rect>, 
         prof.hud.title = title.map(|r| [r.x, r.y, r.w as i32, r.h as i32]);
         let _ = save_toml(p, &prof);
     }
+}
+
+/// Writes the history row and the song's memory for a finished song. With the results screen
+/// read, its counts and accuracy replace the last live ones.
+fn finish_song(
+    book: &mut SongBook,
+    book_path: Option<&std::path::Path>,
+    s: &HudSetup,
+    style_id: &str,
+    mut p: PendingResults,
+    results: Option<ResultsRead>,
+    tx: &Tx,
+) {
+    if let Some(r) = &results {
+        p.song.counts = Some(r.counts);
+        if let Some(a) = r.accuracy {
+            p.song.stats.get_or_insert_with(Default::default).accuracy = Some(a);
+        }
+    }
+    write_history(
+        s,
+        &p.song,
+        p.offset_ms,
+        p.engine_missed,
+        p.watchdog,
+        p.ended,
+        results.as_ref(),
+        tx,
+    );
+    record_song(book, book_path, s, style_id, &p.song, p.bias_ms, tx);
 }
 
 /// The play goes into the song's memory (`songs.json`): offset and corrections (when enough
@@ -862,12 +993,15 @@ fn save_bias(s: &HudSetup, bias_ms: f32, tx: &Tx) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_history(
     s: &HudSetup,
     song: &Song,
     offset_ms: f32,
     engine_missed: u32,
     watchdog: u32,
+    ended: Instant,
+    results: Option<&ResultsRead>,
     tx: &Tx,
 ) {
     let (Some(started), Some(t0)) = (song.started, song.t0) else {
@@ -889,7 +1023,7 @@ fn write_history(
         v: 1,
         started: rfc3339(started),
         // the 3 s without notes that ended it are not part of the song
-        duration_s: (t0.elapsed().as_secs_f32() - 3.0).max(0.0),
+        duration_s: (ended.duration_since(t0).as_secs_f32() - 3.0).max(0.0),
         song: song.name.clone(),
         difficulty: song.difficulty.clone(),
         profile: s.profile.clone(),
@@ -904,6 +1038,8 @@ fn write_history(
         watchdog_releases: watchdog,
         seed: s.seed,
         hit_hist: hist(&song.hit_errs),
+        total_notes: results.and_then(|r| r.total_notes),
+        highest_combo: results.and_then(|r| r.highest_combo),
     };
     let Some(p) = data_dir().map(|d| d.join("history.jsonl")) else {
         return;

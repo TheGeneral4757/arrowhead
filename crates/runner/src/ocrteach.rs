@@ -4,7 +4,7 @@
 //! panel's arithmetic holds (Hits = Sick + Good + Ok + Bad, Misses = Miss).
 
 use arrowhead_core::frame::Rect;
-use arrowhead_core::hud::{Counts, StatsRead};
+use arrowhead_core::hud::{Counts, ResultsRead, StatsRead};
 
 pub type Lines = [(String, Rect)];
 
@@ -17,7 +17,7 @@ fn repair(c: char) -> Option<char> {
         'O' | 'o' | 'D' | 'Q' => '0',
         'I' | 'l' | '|' | ')' | '(' | '!' | 'i' | 'J' => '1',
         'Z' | 'z' => '2',
-        'G' | 'b' => '6',
+        'G' | 'b' | 'C' => '6',
         'B' => '8',
         'Y' | 'y' => '4',
         'T' => '7',
@@ -135,6 +135,87 @@ pub fn counts(lines: &Lines) -> Counts {
         bad: uint(lines, "BAD"),
         miss: uint(lines, "MISS"),
     }
+}
+
+/// The first word after `label`, repaired: the results screen can run a value into the next
+/// text on its line ("TOTAL NOTES: 727 136430" is the notes and the final score).
+fn first_uint(lines: &Lines, label: &str) -> Option<u32> {
+    let rest = after(lines, label)?.0;
+    let word = rest
+        .trim_start_matches([':', ';', ' ', '.', '?', '\'', '!'])
+        .split_whitespace()
+        .next()?;
+    digits(word)?.parse().ok()
+}
+
+/// The most common value, the first seen on a tie.
+fn mode<T: PartialEq + Copy>(vals: impl Iterator<Item = Option<T>>) -> Option<T> {
+    let mut t: Vec<(T, u32)> = vec![];
+    for v in vals.flatten() {
+        match t.iter_mut().find(|e| e.0 == v) {
+            Some(e) => e.1 += 1,
+            None => t.push((v, 1)),
+        }
+    }
+    t.iter()
+        .fold(None, |b: Option<&(T, u32)>, e| match b {
+            Some(x) if x.1 >= e.1 => b,
+            _ => Some(e),
+        })
+        .map(|e| e.0)
+}
+
+/// The results screen ("Stats from Last Song") from OCR passes over a full frame and over the
+/// counts column. `None` unless one reading of the five judgment counts and Total Notes is
+/// clearly the best and adds up (Sick + Good + Ok + Bad + Miss = Total Notes). Accuracy
+/// outside 0..=100 and a combo above Total Notes are dropped.
+pub fn results(passes: &[Vec<(String, Rect)>]) -> Option<ResultsRead> {
+    let row = |f: fn(&Lines) -> Option<u32>| tally(passes.iter().map(|p| f(p)));
+    let rows = [
+        row(|l| first_uint(l, "SICK")),
+        row(|l| first_uint(l, "GOOD")),
+        row(|l| first_uint(l, "OK").or_else(|| first_uint(l, "OR"))),
+        row(|l| first_uint(l, "BAD")),
+        row(|l| first_uint(l, "MISS")),
+        row(|l| first_uint(l, "TOTAL NOTES")),
+    ];
+    let v = best_consistent(&rows, |v| v[5] > 0 && v[..5].iter().sum::<u32>() == v[5])?;
+    let total = v[5];
+    let st: Vec<StatsRead> = passes.iter().map(|p| stats(p)).collect();
+    Some(ResultsRead {
+        counts: Counts {
+            sick: Some(v[0]),
+            good: Some(v[1]),
+            ok: Some(v[2]),
+            bad: Some(v[3]),
+            miss: Some(v[4]),
+        },
+        total_notes: Some(total),
+        accuracy: mode(st.iter().map(|s| s.accuracy)),
+        mean_ms: mode(st.iter().map(|s| s.mean_ms)),
+        combo: mode(
+            passes
+                .iter()
+                .map(|p| first_uint(p, "COMBO").filter(|&c| c <= total)),
+        ),
+        highest_combo: mode(
+            passes
+                .iter()
+                .map(|p| first_uint(p, "HIGHEST COMBO").filter(|&c| c <= total)),
+        ),
+    })
+}
+
+/// Where the counts column is, from the lines of one pass: crop it and read it again, the
+/// thin digits are lost in a whole-frame pass.
+pub fn results_panel(lines: &Lines) -> Option<Rect> {
+    let rs: Vec<Rect> = ["SICK", "GOOD", "BAD", "MISS", "TOTAL NOTES"]
+        .iter()
+        .filter_map(|l| after(lines, l).map(|(_, r)| r))
+        .collect();
+    (rs.len() >= 3)
+        .then(|| union(&rs).map(|r| padded(r, 30)))
+        .flatten()
 }
 
 /// The value every pass read alike (for values no arithmetic can check).
@@ -500,6 +581,139 @@ mod tests {
             mk(["SICK 85", "GOOD: 61", "OK? 4?", "BAD: 26", "MIS: 170"]),
             mk(["SICK: 85", "GOOD: GN", "OR 47", "BAD: 26", "MI55: 170"]),
         ]
+    }
+
+    fn lines(rows: &[&str]) -> Vec<(String, Rect)> {
+        rows.iter()
+            .enumerate()
+            .map(|(i, t)| l(t, i as i32 * 40))
+            .collect()
+    }
+
+    #[test]
+    fn reads_the_results_panel() {
+        // real ocrs output on the results screen (plain 2x)
+        let r = results(&[lines(&[
+            "STATS FROM LAST SONG",
+            "SICk: 243",
+            "GOOD: 180",
+            "Ok: 122",
+            "BAD: 82",
+            "MISS: 6",
+            "TOTAL NOTES: 633",
+            "ACCURACY: 84.93%",
+            "MEAN M5: 48.40 M5",
+            "COMBO: 2",
+            "HIGHEST COMBO: 47",
+            "FINAL SCORE",
+            "135320",
+        ])])
+        .unwrap();
+        assert_eq!(r.counts.sick, Some(243));
+        assert_eq!(r.counts.ok, Some(122));
+        assert_eq!(r.counts.miss, Some(6));
+        assert_eq!(r.total_notes, Some(633));
+        assert_eq!(r.accuracy, Some(84.93));
+        assert_eq!(r.mean_ms, Some(48.4));
+        assert_eq!((r.combo, r.highest_combo), (Some(2), Some(47)));
+        // a quote before a label, O for 0, R for K, the final score run onto the total line
+        let r = results(&[lines(&[
+            "SICk: 243",
+            "\"GO0D:177",
+            "OR: 123",
+            "BAD: 115",
+            "MI5S: 69",
+            "TOTAL NOTES: 727 136430",
+            "ACCURACY: 82 98%",
+        ])])
+        .unwrap();
+        assert_eq!(r.counts.good, Some(177));
+        assert_eq!(r.counts.ok, Some(123));
+        assert_eq!(r.total_notes, Some(727));
+        assert_eq!(r.accuracy, Some(82.98));
+    }
+
+    #[test]
+    fn results_that_do_not_add_up_are_rejected() {
+        // "BAD: S" (a 5 for the real 115): the counts miss Total Notes
+        let bad = lines(&[
+            "SICk: 243",
+            "GOOD: 177",
+            "OR: 123",
+            "BAD: S",
+            "MI5S: 69",
+            "TOTAL NOTES: 727",
+        ]);
+        assert_eq!(results(&[bad]), None);
+        // a count that does not parse at all
+        let bad = lines(&[
+            "SICk: 190",
+            "GOOD: 112",
+            "OR: 74",
+            "BAD: S?",
+            "MI5S: S?",
+            "TOTAL NOTES: 488",
+        ]);
+        assert_eq!(results(&[bad]), None);
+        // no Total Notes line
+        let bad = lines(&["SICk: 1", "GOOD: 1", "OK: 1", "BAD: 1", "MISS: 1"]);
+        assert_eq!(results(&[bad]), None);
+    }
+
+    #[test]
+    fn results_vote_across_passes() {
+        // real ocrs output on the full frame and on the counts column (results4): no single
+        // pass has Miss right (6, 60, 61), together with Total Notes 688 they settle it
+        let full = lines(&[
+            "SICk: 243",
+            "GOOD: 180",
+            "Ok: 122",
+            "BAD: 82",
+            "MISS: 6",
+            "TOTAL NOTES: 688",
+            "ACCURACY: 84.93%",
+        ]);
+        let col = lines(&[
+            "SICK: 243",
+            "GOOD: 180",
+            "Ok: 122",
+            "BAD: 82",
+            "MI55: 6)",
+            "TOTAL NOTES: 688",
+        ]);
+        assert_eq!(results(std::slice::from_ref(&full)), None);
+        let r = results(&[full.clone(), col]).unwrap();
+        assert_eq!(r.counts.miss, Some(61));
+        assert_eq!(r.accuracy, Some(84.93));
+        // C is a 6 in the game font (results3: Bad 56, Miss 56)
+        let r = results(&[lines(&[
+            "SICk: 190",
+            "GOOD: 112",
+            "OR: 74",
+            "BAD: 56",
+            "MISS: SC",
+            "TOTAL NOTES: 488",
+        ])])
+        .unwrap();
+        assert_eq!((r.counts.bad, r.counts.miss), (Some(56), Some(56)));
+        assert!(results_panel(&full).is_some());
+    }
+
+    #[test]
+    fn results_drop_an_implausible_accuracy() {
+        let r = results(&[lines(&[
+            "SICk: 1",
+            "GOOD: 1",
+            "OK: 1",
+            "BAD: 1",
+            "MISS: 1",
+            "TOTAL NOTES: 5",
+            "ACCURACY: 84.482%",
+            "HIGHEST COMBO: 99",
+        ])])
+        .unwrap();
+        assert_eq!(r.accuracy, None, "844.82 is out of range");
+        assert_eq!(r.highest_combo, None, "more than the notes");
     }
 
     #[test]

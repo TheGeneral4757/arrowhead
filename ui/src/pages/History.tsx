@@ -136,7 +136,14 @@ export default function History() {
                         {when(e.started)}
                       </button>
                     </td>
-                    <td>{song(e)}</td>
+                    <td>
+                      {song(e)}
+                      {e.total_notes != null && (
+                        <div className="muted">
+                          {e.total_notes} notes{e.highest_combo != null ? `, best combo ${e.highest_combo}` : ""}
+                        </div>
+                      )}
+                    </td>
                     <td>{e.style}</td>
                     <td className="num measured">{fixed(e.accuracy_hud, 2, "%")}</td>
                     {JUDGMENTS.map((j) => (
