@@ -1,6 +1,7 @@
 //! Engine: frame types, detection, tracking, timing, scheduler, player model,
 //! session state and config. OS-free except `runtime::platform`.
 
+pub mod adapt;
 pub mod config;
 pub mod detect;
 pub mod engine;

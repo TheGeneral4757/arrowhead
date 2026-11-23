@@ -1,5 +1,6 @@
 //! Planning (spec 04): tracks -> press and release times.
 
+use crate::adapt::{CHORD_MS, Class, JACK_MS};
 use crate::config::Config;
 use crate::style::{NoteCtx, NoteDraw, StylePlayer, chord_term, jack_term, stream_term};
 use crate::time::Nanos;
@@ -14,6 +15,9 @@ pub struct PlanConfig {
     pub max_hold_ms: f64,
     /// Added to every crossing (negative = send earlier): latency compensation + game bias.
     pub offset_ms: f64,
+    /// Per-lane and per-class corrections added to press and release (spec 04, adaptation).
+    pub lane_offset_ms: [f64; 4],
+    pub class_offset_ms: [f64; 3],
 }
 
 impl PlanConfig {
@@ -25,6 +29,8 @@ impl PlanConfig {
             min_gap_ms: c.timing.min_gap_ms as f64,
             max_hold_ms: c.safety.max_hold_ms as f64,
             offset_ms,
+            lane_offset_ms: [0.0; 4],
+            class_offset_ms: [0.0; 3],
         }
     }
 }
@@ -55,6 +61,9 @@ struct Commit {
     id: u32,
     lane: u8,
     cross: f64,
+    class: Class,
+    /// Lane + class correction applied to this note, ms.
+    corr: f64,
     /// NaN when skipped (found too late).
     press: f64,
     release: f64,
@@ -123,6 +132,56 @@ impl Planner {
             .iter()
             .find(|p| p.id == id)
             .map_or(0.0, |p| p.draw.error_ms as f32)
+    }
+
+    /// Lane and class corrections from `adapt::Bias`, ms; takes effect for notes planned from now on.
+    pub fn set_corrections(&mut self, lane: [f64; 4], class: [f64; 3]) {
+        self.cfg.lane_offset_ms = lane;
+        self.cfg.class_offset_ms = class;
+    }
+
+    /// Class of the planned note for track `id`; `Single` for an unknown id. For readback attribution.
+    pub fn class_of(&self, id: u32) -> Class {
+        self.commits
+            .iter()
+            .find(|k| k.id == id)
+            .map_or(Class::Single, |k| k.class)
+    }
+
+    /// Chord, then jack, else single, from the visible tracks and the notes already planned.
+    fn classify(&self, tr: &Tracker, id: u32, lane: u8, cross: f64) -> Class {
+        let mut chord = false;
+        let mut jack = false;
+        let mut visit = |oid: u32, olane: u8, x: f64| {
+            if oid == id {
+                return;
+            }
+            if olane != lane && (x - cross).abs() <= CHORD_MS {
+                chord = true;
+            }
+            if olane == lane && x < cross - SAME_NOTE_MS && cross - x < JACK_MS {
+                jack = true;
+            }
+        };
+        for t in tr.tracks().iter().filter(|t| t.confirmed && !t.tail) {
+            if let Some(x) = tr.cross_ms(t) {
+                visit(t.id, t.lane, x);
+            }
+        }
+        for k in self
+            .commits
+            .iter()
+            .filter(|k| !tr.tracks().iter().any(|t| t.id == k.id))
+        {
+            visit(k.id, k.lane, k.cross);
+        }
+        if chord {
+            Class::Chord
+        } else if jack {
+            Class::Jack
+        } else {
+            Class::Single
+        }
     }
 
     /// Accuracy shown by the game (percent), for the controller; `None` uses our own estimate.
@@ -227,7 +286,7 @@ impl Planner {
         cross: f64,
         press: f64,
         now_ms: f64,
-        rel_err: f64,
+        (rel_err, corr): (f64, f64),
     ) -> f64 {
         let c = &self.cfg;
         let mut next_head = f64::INFINITY;
@@ -255,7 +314,7 @@ impl Planner {
         let open = next_head.is_infinite()
             && (tr.trail_cut(lane) || (now_ms > press && now_ms - tr.trail_seen(lane) < 50.0));
         let mut rel = if tail.is_finite() {
-            let end = tail + c.offset_ms;
+            let end = tail + c.offset_ms + corr;
             // Style release error; a hold never ends before 60% of its length.
             if rel_err != 0.0 && end > press {
                 (end + rel_err).max(press + 0.6 * (end - press))
@@ -306,6 +365,8 @@ impl Planner {
             }) {
                 continue;
             }
+            let class = self.classify(tr, t.id, t.lane, cross);
+            let corr = c.lane_offset_ms[t.lane as usize & 3] + c.class_offset_ms[class as usize];
             let draw = if self.style.is_some() {
                 self.draw_for(tr, t.id, t.lane, cross)
             } else {
@@ -318,6 +379,8 @@ impl Planner {
                         id: t.id,
                         lane: t.lane,
                         cross,
+                        class,
+                        corr,
                         press: f64::NAN,
                         release: f64::NAN,
                         rel_err: 0.0,
@@ -325,7 +388,7 @@ impl Planner {
                 }
                 continue;
             }
-            let mut press = cross + c.offset_ms + draw.error_ms;
+            let mut press = cross + c.offset_ms + corr + draw.error_ms;
             if self.style.is_some() {
                 press = press.max(self.lane_floor(t.lane, cross));
             }
@@ -339,6 +402,8 @@ impl Planner {
                         id: t.id,
                         lane: t.lane,
                         cross,
+                        class,
+                        corr,
                         press: f64::NAN,
                         release: f64::NAN,
                         rel_err: 0.0,
@@ -355,7 +420,14 @@ impl Planner {
             {
                 press = k.press;
             }
-            let release = self.release_for(tr, t.lane, cross, press, now_ms, draw.release_error_ms);
+            let release = self.release_for(
+                tr,
+                t.lane,
+                cross,
+                press,
+                now_ms,
+                (draw.release_error_ms, corr),
+            );
             // The previous note in this lane must be up min_gap before this press.
             for k in self
                 .commits
@@ -374,6 +446,8 @@ impl Planner {
                 id: t.id,
                 lane: t.lane,
                 cross,
+                class,
+                corr,
                 press,
                 release,
                 rel_err: draw.release_error_ms,
@@ -392,7 +466,8 @@ impl Planner {
             if !k.press.is_finite() || k.release - now_ms < horizon {
                 continue;
             }
-            let mut rel = self.release_for(tr, k.lane, k.cross, k.press, now_ms, k.rel_err);
+            let mut rel =
+                self.release_for(tr, k.lane, k.cross, k.press, now_ms, (k.rel_err, k.corr));
             // Never move past a later press already committed in this lane.
             for n in self
                 .commits

@@ -32,6 +32,11 @@ pub struct Readback {
     pub min_age_ms: f64,
     pub max_age_ms: f64,
     pub bias_ms: f32,
+    /// Fast start: for the first `fast_n` matched reads the bias is `start - mean error` (0 = off).
+    pub fast_n: u32,
+    start_bias: f32,
+    fast_count: u32,
+    fast_sum: f64,
     last: Option<f32>,
     blank: bool,
 }
@@ -45,6 +50,10 @@ impl Readback {
             min_age_ms: 30.0,
             max_age_ms: 400.0,
             bias_ms,
+            fast_n: 10,
+            start_bias: bias_ms,
+            fast_count: 0,
+            fast_sum: 0.0,
             last: None,
             blank: true,
         }
@@ -84,8 +93,15 @@ impl Readback {
             .0;
         let hit = raw_ms * self.sign;
         let want = presses[i].intended_err_ms;
-        self.bias_ms =
-            (self.bias_ms - self.gain * (hit - want)).clamp(-self.clamp_ms, self.clamp_ms);
+        let next = if self.fast_count < self.fast_n {
+            // Each error was measured under the bias then in force; restate it at the start bias.
+            self.fast_count += 1;
+            self.fast_sum += (hit - want + self.start_bias - self.bias_ms) as f64;
+            self.start_bias - (self.fast_sum / self.fast_count as f64) as f32
+        } else {
+            self.bias_ms - self.gain * (hit - want)
+        };
+        self.bias_ms = next.clamp(-self.clamp_ms, self.clamp_ms);
         Some(Matched {
             press: i,
             hit_error_ms: hit,
@@ -110,6 +126,7 @@ mod tests {
     #[test]
     fn matches_latest_in_window_and_moves_bias() {
         let mut rb = Readback::new(-5.0);
+        rb.fast_n = 0;
         let ps = [
             press(0.0, 0, 0.0),
             press(100.0, 1, 0.0),
@@ -120,6 +137,39 @@ mod tests {
         assert_eq!(m.press, 1);
         assert_eq!(m.hit_error_ms, 10.0); // late
         assert!((m.bias_ms - (-5.5)).abs() < 1e-5); // late -> bias down
+    }
+
+    #[test]
+    fn fast_start_averages_then_steps() {
+        // The game hits 8 ms late at the start bias; each ms of bias moves the hit one ms.
+        let mut rb = Readback::new(-5.0);
+        let ps = [press(0.0, 0, 0.0)];
+        let mut at = 100.0;
+        let mut last = 0.0;
+        for i in 0..10 {
+            let late = 8.0 + (rb.bias_ms + 5.0); // hit error under the current bias
+            let m = rb
+                .on_read(
+                    Nanos::from_ms(at),
+                    -(late + if i % 2 == 0 { 2.0 } else { -2.0 }),
+                    None,
+                    &ps,
+                )
+                .unwrap();
+            last = m.bias_ms;
+            at += 1.0;
+            rb.on_blank();
+        }
+        assert!((last - -13.0).abs() < 1e-3, "{last}"); // -5 - 8
+        // read 11 is a 5% step, not an average
+        let m = rb
+            .on_read(Nanos::from_ms(at), -(8.0 + (last + 5.0)), None, &ps)
+            .unwrap();
+        assert!((m.bias_ms - last).abs() < 1e-3);
+        let m = rb
+            .on_read(Nanos::from_ms(at + 1.0), -20.0, None, &ps)
+            .unwrap();
+        assert!((m.bias_ms - (last - 1.0)).abs() < 1e-3);
     }
 
     #[test]
