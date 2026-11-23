@@ -98,7 +98,9 @@ impl Overlay {
         } else {
             let why = match overlay {
                 AutoOnOff::Off => "set to Off in Settings".to_string(),
-                _ => format!("Auto shows it only with one monitor ({monitors} found); set it to On in Settings"),
+                _ => format!(
+                    "Auto shows it only with one monitor ({monitors} found); set it to On in Settings"
+                ),
             };
             (None, Some(why))
         };

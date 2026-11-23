@@ -228,11 +228,23 @@ pub enum AutoOnOff {
     Off,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Ui {
     pub overlay: AutoOnOff,
     pub minimise_while_playing: AutoOnOff,
+    /// Read the game's HUD (readback, accuracy, counts). Off: plays on the saved offset only.
+    pub hud_reader: bool,
+}
+
+impl Default for Ui {
+    fn default() -> Self {
+        Self {
+            overlay: AutoOnOff::default(),
+            minimise_while_playing: AutoOnOff::default(),
+            hud_reader: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -65,8 +65,9 @@ pub struct HudSetup {
 
 /// Every 8th frame: about 20 Hz at 165 Hz.
 const EVERY: u32 = 8;
-/// Full frames while something is still unknown: about 5 Hz at 165 Hz.
-const EVERY_FULL: u32 = 32;
+/// Full frames while something is still unknown, at the rate `locate` runs (about 2 Hz at
+/// 165 Hz): each is a full-stream copy on the capture thread, so none is taken for nothing.
+const EVERY_FULL: u32 = 80;
 const HIST_FROM_MS: f32 = -240.0;
 const HIST_BIN_MS: f32 = 10.0;
 const HIST_BINS: usize = 48;
@@ -287,7 +288,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
             continue;
         };
 
-        if need_full && last_locate.elapsed() >= Duration::from_millis(500) {
+        if need_full && last_locate.elapsed() >= Duration::from_millis(400) {
             last_locate = Instant::now();
             let before = rd.locs;
             let found = rd.locate(&frames[0].view());

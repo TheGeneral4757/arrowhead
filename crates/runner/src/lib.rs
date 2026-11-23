@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 
 use arrowhead_core::config::{Config, Profile, Scroll, Side, config_dir, load_toml, save_toml};
 use arrowhead_core::detect::calib::{
-    Blob, ColourLearner, Group, find_blobs, find_groups, guess_scroll, layout_for, pick_ours,
+    Blob, ColourLearner, Group, Presence, find_blobs, find_groups, guess_scroll, layout_for,
+    pick_ours,
 };
 use arrowhead_core::detect::{Colours, DetectConfig, Detector, Layout};
 use arrowhead_core::engine::Engine;
@@ -495,8 +496,15 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
     let (hud_tx, hud_rx) = mpsc::sync_channel::<hud::ToHud>(256);
     let (from_hud_tx, from_hud) = mpsc::channel::<hud::FromHud>();
     let r = layout.receptors;
+    if !cfg.ui.hud_reader {
+        log(
+            &tx,
+            Level::Info,
+            "HUD reader off (Settings): playing on the saved offset",
+        );
+    }
     let hud_thread = hud::spawn(
-        src.aux(),
+        src.aux().filter(|_| cfg.ui.hud_reader),
         hud::HudSetup {
             profile: cfg.profile.clone(),
             prof_path: prof_path_hud,
@@ -633,6 +641,12 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
     let mut last_notes = Instant::now();
     let mut last_pts = None;
     let mut last_head = Instant::now();
+    // Receptor presence (spec 03, session): templates from frames taken once notes first
+    // approach (the receptors are surely on screen then); a song ends when they are gone
+    // for 1.5 s (results screen, menu), so breaks inside a song do not split it.
+    let mut presence: Option<Presence> = None;
+    let mut pres_frames: Vec<OwnedFrame> = Vec::new();
+    let mut absent_since: Option<Instant> = None;
     let (mut was_paused, mut was_focused, mut was_dry) =
         (false, true, ctl.dry_run.load(Ordering::SeqCst));
     let mut err = None;
@@ -859,9 +873,35 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
             }
         }
 
-        // Session: a confirmed head means a song is on; 3 s without one means it is over.
+        // Session: a confirmed head means a song is on; receptors gone for 1.5 s mean it is over.
+        if session.state() == arrowhead_core::session::State::Playing {
+            match &presence {
+                None if frames.is_multiple_of(16) => {
+                    // shortcut: 9 frame copies on the scan thread, once per run, to build the templates.
+                    pres_frames.push(f.to_owned());
+                    if pres_frames.len() == 9 {
+                        let views: Vec<FrameView> = pres_frames.iter().map(|f| f.view()).collect();
+                        presence = Some(Presence::new(&layout, &views, &dcfg_hud));
+                        pres_frames = Vec::new();
+                    }
+                }
+                Some(p) if frames.is_multiple_of(10) => {
+                    if p.check(&f) {
+                        absent_since = None;
+                    } else {
+                        absent_since.get_or_insert_with(Instant::now);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let receptors_gone =
+            absent_since.is_some_and(|t| t.elapsed() > Duration::from_millis(1500));
+        // Without templates yet, a long silence still ends the song.
+        let song_over =
+            receptors_gone || (presence.is_none() && last_head.elapsed() > Duration::from_secs(20));
         let tracks = eng.tracker.tracks();
-        if tracks.iter().any(|t| t.confirmed && !t.done) {
+        if tracks.iter().any(|t| t.confirmed && !t.done) && !receptors_gone {
             last_head = Instant::now();
             if let Some(s) = session.on(SEv::HeadApproaching) {
                 state(&tx, s, "notes approaching");
@@ -869,10 +909,17 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
                     let _ = hud_tx.try_send(hud::ToHud::SongStart);
                 }
             }
-        } else if last_head.elapsed() > Duration::from_secs(3)
-            && let Some(s) = session.on(SEv::SongOver)
-        {
-            state(&tx, s, "no notes for 3 s");
+        } else if song_over && let Some(s) = session.on(SEv::SongOver) {
+            absent_since = None;
+            state(
+                &tx,
+                s,
+                if receptors_gone {
+                    "receptors gone: song over"
+                } else {
+                    "no notes for 20 s"
+                },
+            );
             // The HUD thread writes the history row; the session goes straight back to waiting.
             let _ = hud_tx.try_send(hud::ToHud::SongOver {
                 offset_ms: eng.planner.cfg.offset_ms as f32,

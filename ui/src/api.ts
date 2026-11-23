@@ -88,7 +88,7 @@ export type Config = {
     accuracy_weights: { sick: number; good: number; ok: number; bad: number; miss: number };
     readback_sign: number;
   };
-  ui: { overlay: AutoOnOff; minimise_while_playing: AutoOnOff };
+  ui: { overlay: AutoOnOff; minimise_while_playing: AutoOnOff; hud_reader: boolean };
   updates: { check: boolean };
   log: { level: string; per_note: boolean };
 };
