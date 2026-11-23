@@ -49,7 +49,8 @@ Goal: final song accuracy within +/- 0.5% of `target`, without visible sudden ch
 1. **Feed-forward.** Expected accuracy for a given `k` is computed by integrating the error distribution over the judgment windows and an accuracy weight per judgment (`[game.accuracy_weights]`, unverified, default Sick 1.0, Good 0.75, Ok 0.5, Bad 0.25, Miss 0; M0 found the game's accuracy is not count-weighted (likely per-hit ms, [12](12-open-questions.md) G2), so this is only a starting guess and feedback from the HUD readout does the real work; refit from per-hit ms readbacks in v0.2). Solve for the `k` that hits `target` before the song starts (bisection, k in [0.2, 4]).
 2. **Feedback.** Measured accuracy so far: the HUD accuracy readout if readable, else our own estimate from planned errors + readback. Projected final = measured weighted by notes played plus the feed-forward expectation for the rest. PI on `log k`: `Kp = 0.4`, `Ki = 0.05 per s`, update at most every 2 s, `k` changes at most 10% per update.
 3. **Misses** are not a controller knob; the miss rate comes from the style only.
-4. **Max** bypasses the model: `style_error = 0`, no misses, no drift, controller off.
+4. **Per-song target adjust (v0.2).** `songs.json` ([08](08-config.md#songsjson)) remembers each song's last final accuracy per style. At the start of a play the target becomes `target + clamp((target - last_final) / 2, -2, +2)` points (`SongBook::start_values(key, style, target).target_adjust`), so a song that ended under target starts a bit higher and one that ended over starts lower. Only the controller's starting target moves; the style's stored target does not. No memory for a song and style = no adjust.
+5. **Max** bypasses the model: `style_error = 0`, no misses, no drift, controller off.
 
 ## Presets (`[style]`, user-editable, stored in `styles/*.toml`)
 | Preset | target | sigma0 | bias | spread | chord | jack | stream | fatigue | focus_drift | miss_floor | hold_release_ms |

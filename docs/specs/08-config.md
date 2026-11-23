@@ -19,6 +19,7 @@ milestone: M2-M5
 | `styles/<name>.toml` | config | User styles (built-in presets are compiled in and cannot be edited, only copied) |
 | `screencast_token` | data | Portal restore token |
 | `history.jsonl` | data | One line per song |
+| `songs.json` | data | Per-song memory ([below](#songsjson)) |
 | `sessions/<date>-<n>.jsonl` | data | Per-note log for one song (optional, `log.per_note = true`) |
 | `glyphs/<profile>.bin` | data | Glyph atlas (binary: magic `AHGL`, version 1; [03](03-detection.md#teaching-the-atlas-bootstrap)) |
 | `logs/arrowhead.<date>.log` | data | tracing, daily rotation, keep 7 |
@@ -130,6 +131,21 @@ A profile is matched at start by `(monitor, stream_size, scale)`; if none matche
 ```
 
 `hit_hist` (optional, v0.2) holds the song's hit errors for the History page: `counts[i]` covers `[from_ms + i * bin_ms, from_ms + (i + 1) * bin_ms)`. Rows without hit errors leave it out. The app reads the file newest first and skips lines it cannot parse.
+
+## `songs.json`
+Per-song memory (`core::adapt::SongBook`), keyed by `SongBook::key(title)`: the OCR'd title lowercased, punctuation and runs of whitespace turned into single spaces. Written atomically after a play. Unknown fields are kept on save. A file that does not parse is renamed `songs.json.bad` and an empty book is used.
+
+```json
+{"version":1,"songs":{"hello world remix":{
+  "name":"Hello World (Remix)","difficulty":"Hard","plays":3,"last_played":"2026-11-23T10:00:00Z",
+  "offset_ms":-6.4,"lane_ms":[-1.2,0.0,0.4,0.9],"class_ms":[0.0,-1.5,0.8],
+  "styles":{"casual":{"last_accuracy":87.0,"target":90.0}},
+  "max_note":{"lane":[{"good":2,"ok":0,"bad":0,"miss":1},{},{},{}],"class":[{},{"good":3},{}]}}}}
+```
+- `offset_ms`, `lane_ms`, `class_ms`: the readback bias and the `Bias` corrections at the end of the last play with at least 20 readbacks (`MIN_READBACKS`); shorter plays keep the old values. They are the next play's start values (the profile's `latency.game_bias_ms` still applies when a song is new). `class_ms` order: Single, Chord, Jack.
+- `styles.<id>`: last final accuracy and the target of the last play with that style; drives the target adjust ([06](06-humanizer.md#accuracy-controller)).
+- `max_note`: non-Sick judgment counts (Good, Ok, Bad, Miss) per lane and per class from the last Max play, for the UI; the timing side is covered by `lane_ms` and `class_ms`.
+- `StartValues { offset_ms, lane_ms, class_ms, target_adjust, max_note }` is what the runner reads at the start of a play.
 
 ## Diagnostics ("Copy diagnostics")
 Plain text: version, OS, desktop and compositor, capture backend + stats, input backend, focus probe, hotkey backend, active profile (without file paths in the home dir), last 200 log lines at warn+, last 5 history lines. No network upload; it goes to the clipboard only.

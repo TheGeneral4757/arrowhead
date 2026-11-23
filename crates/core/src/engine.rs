@@ -107,6 +107,18 @@ mod tests {
         notes: usize,
         style: Option<StylePlayer>,
     ) -> Score {
+        suite_full(seed, fps, speed, scroll, notes, style, ([0.0; 4], [0.0; 3]))
+    }
+
+    fn suite_full(
+        seed: u64,
+        fps: f64,
+        speed: f64,
+        scroll: Scroll,
+        notes: usize,
+        style: Option<StylePlayer>,
+        corr: ([f64; 4], [f64; 3]),
+    ) -> Score {
         let mut rng = Rng(seed);
         let mut s = Scene::random(&mut rng, 1280, 720, scroll, speed);
         s.fps = fps;
@@ -118,6 +130,7 @@ mod tests {
         if let Some(p) = style {
             eng.planner.set_style(p);
         }
+        eng.planner.set_corrections(corr.0, corr.1);
         let clock = Arc::new(VirtualClock::default());
         let mut sink = RecordingSink::new(clock.clone());
         let mut sched = Scheduler::new(15_000.0);
@@ -209,6 +222,19 @@ mod tests {
             sc.presses += presses.len();
         }
         sc
+    }
+
+    #[test]
+    fn lane_and_class_corrections_shift_presses() {
+        let base = suite(70, 144.0, 2.0, Scroll::Up, 60);
+        let lane = suite_full(70, 144.0, 2.0, Scroll::Up, 60, None, ([-4.0; 4], [0.0; 3]));
+        let class = suite_full(70, 144.0, 2.0, Scroll::Up, 60, None, ([0.0; 4], [-4.0; 3]));
+        assert_eq!(lane.short_presses, 0, "{lane:?}");
+        assert_eq!(lane.unpressed, base.unpressed, "{lane:?}");
+        for sc in [&lane, &class] {
+            let d = sc.worst_press_ms - base.worst_press_ms;
+            assert!((-6.5..=-1.5).contains(&d), "shift {d}: {sc:?} vs {base:?}");
+        }
     }
 
     #[test]
