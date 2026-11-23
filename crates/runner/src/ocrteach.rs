@@ -400,8 +400,9 @@ mod tests {
             (c.sick, c.good, c.ok, c.bad),
             (Some(85), Some(61), Some(47), Some(26))
         );
-        // Misses read 70 / 170, Miss 70 / 170 / 170: 170 = 170 has more passes behind it.
-        assert_eq!((s.misses, c.miss), (Some(170), Some(170)));
+        // Misses read 70 / 170 and Miss 70 / 170, once each: 70 = 70 and 170 = 170 tie, so
+        // neither is trusted until a pass settles it.
+        assert_eq!((s.misses, c.miss), (None, None));
     }
 
     #[test]
