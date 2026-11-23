@@ -14,6 +14,7 @@ arrowhead-core.workspace = true
 arrowhead-capture.workspace = true
 arrowhead-input.workspace = true
 arrowhead-runner.workspace = true
+arrowhead-ocr.workspace = true
 clap.workspace = true
 png.workspace = true
 serde_json.workspace = true

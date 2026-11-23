@@ -55,6 +55,12 @@ jobs:
           cargo build --release -p arrowhead-overlay
           cp target/release/arrowhead-overlay.exe target/release/arrowhead-overlay-x86_64-pc-windows-msvc.exe
 
+      # Windows: the app bundles the OCR models as resources (tauri.windows.conf.json).
+      - name: OCR models
+        if: runner.os == 'Windows'
+        shell: bash
+        run: bash packaging/fetch-ocr-models.sh default target/ocr-models
+
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace

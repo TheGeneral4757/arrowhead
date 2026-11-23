@@ -13,12 +13,18 @@ milestone: M5
 ## Release build (`.github/workflows/release.yml`, on tag)
 | Runner | Build | Assets |
 |---|---|---|
-| ubuntu-24.04 | `tauri build --no-bundle` for the app; `cargo build --release` for cli and overlay | `arrowhead-X.Y.Z-linux-x86_64.tar.gz` (app, cli, overlay, LICENSE, README, `arrowhead.desktop`, `icons/{32,128,256,512}.png`) |
+| ubuntu-24.04 | `tauri build --no-bundle` for the app; `cargo build --release` for cli and overlay | `arrowhead-X.Y.Z-linux-x86_64.tar.gz` (app, cli, overlay, `models/`, LICENSE, THIRD_PARTY_NOTICES.md, README, `arrowhead.desktop`, `icons/{32,128,256,512}.png`) |
 | windows-latest (v0.2) | `tauri build` with the MSI bundler | `arrowhead-X.Y.Z-windows-x86_64.msi`, portable `arrowhead-X.Y.Z-windows-x86_64.zip` |
 
 Plus `SHA256SUMS` and the updater manifest `latest.json` (the tarball is signed with `tauri signer sign`, since `--no-bundle` makes no updater artifacts) signed with the Tauri updater key (secret `TAURI_SIGNING_PRIVATE_KEY` in repo secrets; the public key is in `tauri.conf.json`).
 
 Linux runtime deps (documented in README): webkit2gtk-4.1, libsoup3, gtk3, pipewire, xdg-desktop-portal + a backend (kde or hyprland).
+
+## OCR models (v0.2)
+- The HUD reader's OCR teacher needs `text-detection.onnx` and `text-recognition.onnx` ([03](03-detection.md#ocr-teacher-v02)). `packaging/fetch-ocr-models.sh default <dest>` downloads them from the ocrs-models S3 bucket (the URLs `ocrs-cli` uses) and checks pinned SHA-256 sums; a hash change fails the build. `release.yml` (both jobs) and the Windows leg of `ci.yml` run it into `target/ocr-models`. Models are never committed.
+- Linux tarball: `models/` next to the binaries; the PKGBUILD installs it to `/usr/share/arrowhead/models`. Windows zip: `models/` next to `arrowhead.exe`. MSI: Tauri `bundle.resources` in `tauri.windows.conf.json` maps `target/ocr-models/*` to `models/`, which on Windows lands in the install dir next to the exe (where `Ocr::load` looks; not yet checked on a real MSI).
+- `THIRD_PARTY_NOTICES.md` (CC BY-SA 4.0 attribution for the models) is in the tarball, zip, MSI and `/usr/share/licenses/arrowhead-bin/`.
+- Optional larger set: `packaging/fetch-ocr-models.sh paddle-server` is run by the user, never by CI or the app (the app makes no network calls except the update check); see 03.
 
 ## AUR (`packaging/aur/PKGBUILD`, package `arrowhead-bin`)
 - Installs from the release tarball: `/usr/bin/arrowhead`, `/usr/bin/arrowhead-cli`, `/usr/lib/arrowhead/arrowhead-overlay`, desktop file, hicolor icons (32-512 px), license.

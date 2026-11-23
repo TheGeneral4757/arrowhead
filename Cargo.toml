@@ -15,6 +15,7 @@ arrowhead-core = { path = "crates/core" }
 arrowhead-capture = { path = "crates/capture" }
 arrowhead-input = { path = "crates/input" }
 arrowhead-runner = { path = "crates/runner" }
+arrowhead-ocr = { path = "crates/ocr" }
 tauri = "2.12"
 tauri-build = "2.7"
 tauri-plugin-updater = "2.12"
