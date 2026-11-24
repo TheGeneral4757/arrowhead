@@ -111,6 +111,27 @@ pub struct Stats {
     pub score_opponent: Option<i32>,
 }
 
+/// What the HUD reader sees, about twice a second while a run goes on (Live's "What it sees"
+/// panel and the overlay's boxes). Regions are stream pixels `[x, y, w, h]`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct HudView {
+    /// "loading", "ready" or "off".
+    pub ocr: &'static str,
+    pub stats: Option<[i32; 4]>,
+    pub counts: Option<[i32; 4]>,
+    /// Our ms readout, and its last read.
+    pub ms: Option<[i32; 4]>,
+    pub ms_read: Option<f32>,
+    pub title: Option<[i32; 4]>,
+    /// Score regions and last trusted values, `[left, right]`.
+    pub scores: [Option<[i32; 4]>; 2],
+    pub score_values: [Option<i32>; 2],
+    /// Our side: "left", "right", or None until the stats panel is found (seat auto).
+    pub seat: Option<&'static str>,
+    /// Match my friend: what it is doing, None when off.
+    pub matching: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type")]
 // Notes is large on purpose: boxing it would allocate on the scan thread for every frame.
@@ -180,6 +201,7 @@ pub enum EngineEvent {
     },
     /// Song totals from the HUD and readback, about twice a second while playing.
     Stats(Stats),
+    Hud(HudView),
     /// The song's title, read by OCR at its start.
     Song {
         title: String,

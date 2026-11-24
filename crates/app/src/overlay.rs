@@ -1,10 +1,13 @@
 //! Overlay process control (spec 07, overlay): spawns `arrowhead-overlay`, feeds it the filtered
 //! events as JSON lines on stdin, and minimises the main window while a song plays.
 //! Dropping the `Overlay` closes the queue, which closes the pipe and kills the child.
+//! `shown` (the Live page's toggle) starts or stops the child while a run goes on.
 
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{SyncSender, sync_channel};
 
 use arrowhead_core::config::AutoOnOff;
@@ -16,6 +19,11 @@ use tauri::{AppHandle, Manager, WebviewWindow};
 pub struct Overlay {
     /// None when the overlay is off, missing or failed to start.
     tx: Option<SyncSender<String>>,
+    shown: Arc<AtomicBool>,
+    /// `--output`, `--size`, `--hz` for a restart.
+    args: (String, [u32; 2], f32),
+    /// The last State and Layout, replayed to a restarted child (it draws nothing without).
+    replay: [Option<Value>; 2],
     win: Option<WebviewWindow>,
     minimise: AutoOnOff,
     minimised: bool,
@@ -44,7 +52,7 @@ fn wanted(mode: AutoOnOff, monitors: usize) -> bool {
     }
 }
 
-fn spawn(output: &str, size: [u32; 2]) -> Result<SyncSender<String>, String> {
+fn spawn(output: &str, size: [u32; 2], hz: f32) -> Result<SyncSender<String>, String> {
     let exe = binary().ok_or("arrowhead-overlay not found next to the app")?;
     let mut cmd = Command::new(exe);
     if !output.is_empty() {
@@ -52,6 +60,9 @@ fn spawn(output: &str, size: [u32; 2]) -> Result<SyncSender<String>, String> {
     }
     if size[0] > 0 {
         cmd.args(["--size", &format!("{}x{}", size[0], size[1])]);
+    }
+    if hz > 0.0 {
+        cmd.args(["--hz", &hz.to_string()]);
     }
     let mut child = cmd
         .stdin(Stdio::piped())
@@ -80,18 +91,21 @@ fn spawn(output: &str, size: [u32; 2]) -> Result<SyncSender<String>, String> {
 }
 
 impl Overlay {
-    /// `output` and `size` are the profile's monitor name and stream size, which pick the
-    /// overlay's output. Returns the overlay and, when it could not start, why (for the log).
+    /// `output`, `size` and `hz` (the profile's monitor name, stream size and rate, or the
+    /// `ui.overlay_output` override) pick the overlay's output. Sets `shown` to whether it
+    /// runs. Returns the overlay and, when it could not start, why (for the log).
     pub fn start(
         app: &AppHandle,
         overlay: AutoOnOff,
         minimise: AutoOnOff,
-        output: &str,
-        size: [u32; 2],
+        (output, size, hz): (&str, [u32; 2], f32),
+        shown: Arc<AtomicBool>,
     ) -> (Self, Option<String>) {
         let monitors = app.available_monitors().map_or(1, |m| m.len());
-        let (tx, err) = if wanted(overlay, monitors) {
-            match spawn(output, size) {
+        let want = wanted(overlay, monitors);
+        shown.store(want, Ordering::SeqCst);
+        let (tx, err) = if want {
+            match spawn(output, size, hz) {
                 Ok(tx) => (Some(tx), None),
                 Err(e) => (None, Some(e)),
             }
@@ -99,14 +113,20 @@ impl Overlay {
             let why = match overlay {
                 AutoOnOff::Off => "set to Off in Settings".to_string(),
                 _ => format!(
-                    "Auto shows it only with one monitor ({monitors} found); set it to On in Settings"
+                    "Auto shows it only with one monitor ({monitors} found); set it to On in Settings or show it from Live"
                 ),
             };
             (None, Some(why))
         };
+        if err.is_some() {
+            shown.store(false, Ordering::SeqCst);
+        }
         (
             Self {
                 tx,
+                shown,
+                args: (output.to_string(), size, hz),
+                replay: [None, None],
                 win: app.get_webview_window("main"),
                 minimise,
                 minimised: false,
@@ -132,6 +152,10 @@ impl Overlay {
             }
             _ => {}
         }
+        if let EngineEvent::State { .. } | EngineEvent::Layout { .. } = e {
+            let i = usize::from(matches!(e, EngineEvent::Layout { .. }));
+            self.replay[i] = serde_json::to_value(e).ok();
+        }
         if self.tx.is_some()
             && matches!(
                 e,
@@ -140,6 +164,7 @@ impl Overlay {
                     | EngineEvent::Planned { .. }
                     | EngineEvent::Pressed { .. }
                     | EngineEvent::Readback { .. }
+                    | EngineEvent::Hud(_)
             )
             && let Ok(v) = serde_json::to_value(e)
         {
@@ -149,6 +174,19 @@ impl Overlay {
 
     /// Sends what `push` collected as one line.
     pub fn flush(&mut self) {
+        let shown = self.shown.load(Ordering::Relaxed);
+        if shown != self.tx.is_some() {
+            self.tx = None;
+            if shown {
+                let (o, s, hz) = &self.args;
+                self.tx = spawn(o, *s, *hz).ok();
+                if self.tx.is_none() {
+                    self.shown.store(false, Ordering::SeqCst);
+                }
+                let replay: Vec<Value> = self.replay.iter().flatten().cloned().collect();
+                self.batch.splice(0..0, replay);
+            }
+        }
         if self.batch.is_empty() {
             return;
         }

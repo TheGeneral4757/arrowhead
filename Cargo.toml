@@ -45,6 +45,37 @@ rand_chacha = "0.9"
 [profile.dev.package.arrowhead-core]
 opt-level = 3
 
+# OCR is unusably slow unoptimised (the model alone took over 24 s to load in a dev run)
+[profile.dev.package.ocrs]
+opt-level = 3
+
+[profile.dev.package.rten]
+opt-level = 3
+
+[profile.dev.package.rten-base]
+opt-level = 3
+
+[profile.dev.package.rten-gemm]
+opt-level = 3
+
+[profile.dev.package.rten-imageproc]
+opt-level = 3
+
+[profile.dev.package.rten-onnx]
+opt-level = 3
+
+[profile.dev.package.rten-parallel]
+opt-level = 3
+
+[profile.dev.package.rten-simd]
+opt-level = 3
+
+[profile.dev.package.rten-tensor]
+opt-level = 3
+
+[profile.dev.package.rten-vecmath]
+opt-level = 3
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

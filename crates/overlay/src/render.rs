@@ -87,14 +87,36 @@ fn text_w(s: &str, px: f32) -> f32 {
     (s.chars().count() as f32 * 6.0 - 1.0) * px
 }
 
-/// Capitals and spaces only; anything else is skipped.
+#[rustfmt::skip]
+const DIGITS: [[u8; 7]; 10] = [
+    [0b01110,0b10001,0b10011,0b10101,0b11001,0b10001,0b01110],
+    [0b00100,0b01100,0b00100,0b00100,0b00100,0b00100,0b01110],
+    [0b01110,0b10001,0b00001,0b00010,0b00100,0b01000,0b11111],
+    [0b11110,0b00001,0b00001,0b01110,0b00001,0b00001,0b11110],
+    [0b00010,0b00110,0b01010,0b10010,0b11111,0b00010,0b00010],
+    [0b11111,0b10000,0b11110,0b00001,0b00001,0b10001,0b01110],
+    [0b00110,0b01000,0b10000,0b11110,0b10001,0b10001,0b01110],
+    [0b11111,0b00001,0b00010,0b00100,0b01000,0b01000,0b01000],
+    [0b01110,0b10001,0b10001,0b01110,0b10001,0b10001,0b01110],
+    [0b01110,0b10001,0b10001,0b01111,0b00001,0b00010,0b01100],
+];
+const MINUS: [u8; 7] = [0, 0, 0, 0b11111, 0, 0, 0];
+const DOT: [u8; 7] = [0, 0, 0, 0, 0, 0b01100, 0b01100];
+const QUESTION: [u8; 7] = [0b01110, 0b10001, 0b00001, 0b00110, 0b00100, 0, 0b00100];
+
+/// Capitals, digits, `-`, `.`, `?` and spaces; anything else is skipped.
 fn text(pm: &mut Pixmap, s: &str, x: f32, y: f32, px: f32, c: Color) {
     for (i, ch) in s.chars().enumerate() {
         let ch = ch.to_ascii_uppercase();
-        if !ch.is_ascii_uppercase() {
-            continue;
-        }
-        for (row, bits) in FONT[(ch as u8 - b'A') as usize].iter().enumerate() {
+        let glyph = match ch {
+            'A'..='Z' => &FONT[(ch as u8 - b'A') as usize],
+            '0'..='9' => &DIGITS[(ch as u8 - b'0') as usize],
+            '-' => &MINUS,
+            '.' => &DOT,
+            '?' => &QUESTION,
+            _ => continue,
+        };
+        for (row, bits) in glyph.iter().enumerate() {
             for colm in 0..5 {
                 if bits >> (4 - colm) & 1 == 1 {
                     let gx = x + (i as f32 * 6.0 + colm as f32) * px;
@@ -145,6 +167,38 @@ pub fn render(d: &Draw, pm: &mut Pixmap) {
         width: (2.0 * u).max(1.0),
         ..Stroke::default()
     };
+
+    // What the HUD reader found: an outline and a label above each region.
+    for (r, label) in &d.hud {
+        let (x, y, w, h) = (
+            r[0] as f32 * s,
+            r[1] as f32 * s,
+            r[2] as f32 * s,
+            r[3] as f32 * s,
+        );
+        let mut p = Paint::default();
+        p.set_color(col(ACCENT, 0.8));
+        if let Some(rect) = Rect::from_xywh(x, y, w.max(1.0), h.max(1.0)) {
+            pm.stroke_path(
+                &PathBuilder::from_rect(rect),
+                &p,
+                &stroke,
+                Transform::identity(),
+                None,
+            );
+        }
+        let px = 1.5 * u;
+        let ly = (y - 7.0 * px - 6.0 * u).max(0.0);
+        fill(
+            pm,
+            x,
+            ly,
+            text_w(label, px) + 8.0 * u,
+            7.0 * px + 4.0 * u,
+            col(PAPER, 0.8),
+        );
+        text(pm, label, x + 4.0 * u, ly + 2.0 * u, px, col(ACCENT, 1.0));
+    }
 
     for (i, r) in l.receptors.iter().enumerate() {
         let (cx, cy) = (r[0] * s, r[1] * s);

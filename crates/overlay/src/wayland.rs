@@ -195,7 +195,11 @@ delegate_shm!(App);
 delegate_layer!(App);
 delegate_registry!(App);
 
-pub fn run(output: Option<String>, size: Option<(i32, i32)>) -> Result<(), String> {
+pub fn run(
+    output: Option<String>,
+    size: Option<(i32, i32)>,
+    hz: Option<f32>,
+) -> Result<(), String> {
     let conn = Connection::connect_to_env().map_err(|e| format!("no Wayland display: {e}"))?;
     let (globals, queue) = registry_queue_init::<App>(&conn).map_err(|e| e.to_string())?;
     let qh = queue.handle();
@@ -241,13 +245,23 @@ pub fn run(output: Option<String>, size: Option<(i32, i32)>) -> Result<(), Strin
                 .find(|(i, _)| i.as_ref().and_then(|i| i.name.as_deref()) == Some(n))
         })
         .or_else(|| {
-            // The portal does not name the output; the stream size is the next best match.
-            size.and_then(|sz| {
-                outputs.iter().find(|(i, _)| {
-                    i.as_ref()
-                        .is_some_and(|i| i.modes.iter().any(|m| m.current && m.dimensions == sz))
+            // The portal does not name the output; the stream's size and rate are the next best
+            // match (two monitors of one size differ in rate more often than not).
+            let current = |rate: bool| {
+                outputs.iter().find(move |(i, _)| {
+                    i.as_ref().is_some_and(|i| {
+                        i.modes.iter().any(|m| {
+                            m.current
+                                && Some(m.dimensions) == size
+                                && (!rate
+                                    || hz.is_some_and(|hz| {
+                                        (m.refresh_rate as f32 / 1000.0 - hz).abs() < 1.5
+                                    }))
+                        })
+                    })
                 })
-            })
+            };
+            current(true).or_else(|| current(false))
         })
         .or_else(|| outputs.first());
     if let Some((info, _)) = chosen {

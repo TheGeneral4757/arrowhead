@@ -38,6 +38,17 @@ pub enum Msg {
         ms: f32,
         judgment: String,
     },
+    /// What the HUD reader found (core `HudView`): regions in stream pixels, last reads.
+    Hud {
+        stats: Option<[i32; 4]>,
+        counts: Option<[i32; 4]>,
+        ms: Option<[i32; 4]>,
+        ms_read: Option<f32>,
+        title: Option<[i32; 4]>,
+        scores: [Option<[i32; 4]>; 2],
+        score_values: [Option<i32>; 2],
+        seat: Option<String>,
+    },
     /// Everything else (Pipeline, Log, ...): ignored.
     #[serde(other)]
     Other,
@@ -63,6 +74,8 @@ pub struct Draw {
     pub planned: Vec<(u32, u8, f64)>,
     pub judgment: Option<String>,
     pub errors: VecDeque<f32>,
+    /// HUD regions to outline, with labels: (rect in stream pixels, label).
+    pub hud: Vec<([i32; 4], String)>,
 }
 
 impl Draw {
@@ -119,6 +132,44 @@ impl Draw {
                 self.judgment = Some(judgment);
                 true
             }
+            Msg::Hud {
+                stats,
+                counts,
+                ms,
+                ms_read,
+                title,
+                scores,
+                score_values,
+                seat,
+            } => {
+                let ours = seat.as_deref().map(|s| usize::from(s == "right"));
+                let score = |i: usize| {
+                    let who = match ours {
+                        Some(o) if o == i => "you",
+                        Some(_) => "opp",
+                        None => "score",
+                    };
+                    let v = score_values[i].map_or("?".into(), |v| v.to_string());
+                    format!("{who} {v}")
+                };
+                let hud: Vec<([i32; 4], String)> = [
+                    (stats, "stats".to_string()),
+                    (counts, "counts".to_string()),
+                    (
+                        ms,
+                        format!("ms {}", ms_read.map_or("?".into(), |v| format!("{v:.1}"))),
+                    ),
+                    (title, "title".to_string()),
+                    (scores[0], score(0)),
+                    (scores[1], score(1)),
+                ]
+                .into_iter()
+                .filter_map(|(r, l)| Some((r?, l)))
+                .collect();
+                let changed = hud != self.hud;
+                self.hud = hud;
+                changed
+            }
             Msg::Other => false,
         }
     }
@@ -162,5 +213,27 @@ mod tests {
         assert!(!d.apply(Msg::Pressed { id: 1 }));
         assert!(d.apply(Msg::Notes { t_ms: 500.0 }));
         assert!(d.planned.is_empty());
+    }
+
+    #[test]
+    fn hud_view_from_core_labels_sides() {
+        use arrowhead_core::event::{EngineEvent, HudView};
+        let e = EngineEvent::Hud(HudView {
+            ocr: "ready",
+            stats: Some([1, 2, 3, 4]),
+            ms_read: Some(-12.34),
+            ms: Some([5, 6, 7, 8]),
+            scores: [Some([0, 9, 9, 9]), Some([9, 9, 9, 9])],
+            score_values: [Some(-395), None],
+            seat: Some("left"),
+            ..HudView::default()
+        });
+        let l = serde_json::to_string(&[e]).unwrap();
+        let mut d = Draw::default();
+        for m in parse_batch(&l) {
+            assert!(d.apply(m));
+        }
+        let labels: Vec<&str> = d.hud.iter().map(|h| h.1.as_str()).collect();
+        assert_eq!(labels, ["stats", "ms -12.3", "you -395", "opp ?"]);
     }
 }

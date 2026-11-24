@@ -16,7 +16,7 @@ use arrowhead_core::config::{
     HistoryEntry, HitHist, MatchFriend, Profile, Seat, Windows, append_history, data_dir,
     load_toml, save_toml,
 };
-use arrowhead_core::event::{EngineEvent, Level, Stats};
+use arrowhead_core::event::{EngineEvent, HudView, Level, Stats};
 use arrowhead_core::frame::{AuxTap, OwnedFrame, Rect};
 use arrowhead_core::hud::readback::{Readback, SentPress};
 use arrowhead_core::hud::{
@@ -85,11 +85,11 @@ const EVERY: u32 = 8;
 /// Full frames while something is still unknown, at the rate `locate` runs (about 2 Hz at
 /// 165 Hz): each is a full-stream copy on the capture thread, so none is taken for nothing.
 const EVERY_FULL: u32 = 80;
-/// Scores: OCR at most this often when the glyph reader cannot read one; the matcher's update
-/// rate; how long the score regions are searched for at song start (full frames slow readback).
+/// Scores: OCR at most this often when the glyph reader cannot read one, or while a score's
+/// region is still searched for (all song, in the bottom corners); the matcher's update rate.
 const SCORE_OCR_EVERY: Duration = Duration::from_secs(2);
+const SCORE_FIND_EVERY: Duration = Duration::from_secs(3);
 const MATCH_EVERY: Duration = Duration::from_secs(1);
-const SCORE_HUNT: Duration = Duration::from_secs(15);
 const HIST_FROM_MS: f32 = -240.0;
 const HIST_BIN_MS: f32 = 10.0;
 const HIST_BINS: usize = 48;
@@ -123,6 +123,9 @@ struct Song {
     matcher: Option<Matcher>,
     last_match: Option<Instant>,
     score_warned: bool,
+    /// For the HUD view: the last ms readout read, and what the matcher is doing.
+    ms_read: Option<f32>,
+    match_note: Option<String>,
 }
 
 /// Keep `v` as side's score when it is a move the score can make since the last trusted one.
@@ -292,6 +295,8 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
     let mut requested: Vec<Rect> = vec![];
     let mut last_locate = Instant::now() - Duration::from_secs(10);
     let mut last_score_ocr = Instant::now() - SCORE_OCR_EVERY;
+    let mut last_score_find = Instant::now() - SCORE_FIND_EVERY;
+    let mut last_stats_emit = Instant::now();
     let mut dirty_atlas = false;
     let mut title_rect: Option<Rect> = s
         .hud
@@ -460,6 +465,12 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
         // Ask for what we need: full frames until the stats, counts and our ms readout are
         // found, then just their rects.
         let l = rd.locs;
+        // a missing score region is searched for in its bottom corner all song (small copies,
+        // so readback keeps its rate)
+        let hunt = [l.score_left, l.score_right]
+            .map(|r| r.is_none() && ocr.is_some() && song.t0.is_some());
+        let corners =
+            [0, 1].map(|i| hunt[i].then(|| crate::ocrteach::score_corner(s.stream, i == 0)));
         let known: Vec<Rect> = [
             l.stats,
             l.counts,
@@ -467,17 +478,13 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
             title_rect,
             l.score_left,
             l.score_right,
+            corners[0],
+            corners[1],
         ]
         .into_iter()
         .flatten()
         .collect();
-        // score regions are only hunted for when matching, and only early in a song
-        let hunt_scores = song.matcher.is_some()
-            && ocr.is_some()
-            && (l.score_left.is_none() || l.score_right.is_none())
-            && song.t0.is_some_and(|t| t.elapsed() < SCORE_HUNT);
-        let need_full = hunt_scores
-            || l.stats.is_none()
+        let need_full = l.stats.is_none()
             || l.counts.is_none()
             || l.ms.is_none()
             || (ocr.is_some() && title_rect.is_none())
@@ -683,6 +690,28 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                     }
                 }
                 Done::Results(None) => {}
+                Done::ScoreRegions([sl, sr]) => {
+                    let before = rd.locs;
+                    rd.locs.score_left = rd.locs.score_left.or(sl);
+                    rd.locs.score_right = rd.locs.score_right.or(sr);
+                    if rd.locs != before {
+                        save_regions_with_title(&s, &rd.locs, title_rect, &tx);
+                        log(
+                            &tx,
+                            Level::Info,
+                            format!(
+                                "HUD: found scores: left {}, right {}",
+                                yes(rd.locs.score_left),
+                                yes(rd.locs.score_right)
+                            ),
+                        );
+                    }
+                }
+                Done::Ready => log(&tx, Level::Info, "OCR ready"),
+                Done::Failed(e) => {
+                    log(&tx, Level::Warn, format!("OCR off: {e}"));
+                    ocr = None;
+                }
                 Done::Scores(read) => {
                     for (i, r) in read.into_iter().enumerate() {
                         if let Some((v, crop)) = r
@@ -828,6 +857,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
             && let Some(f) = holding(&frames, r)
         {
             let read = rd.read_ms(&f.view(), r);
+            song.ms_read = read.0.or(song.ms_read);
             // The readout font is missing digits and Hits just went up by one: Mean MS says what
             // the readout shows (to its rounding), and OCR's reading of it can be checked.
             if read.0.is_none()
@@ -918,7 +948,17 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                     crops[i] = Some(f.view().crop(r));
                 }
             }
-            if unread
+            if corners.iter().any(Option::is_some)
+                && let Some(w) = ocr.as_mut()
+                && !w.busy()
+                && last_score_find.elapsed() >= SCORE_FIND_EVERY
+            {
+                last_score_find = Instant::now();
+                w.offer(crate::ocrwork::Job::FindScores {
+                    corners: corners.map(|c| Some(holding(&frames, c?)?.view().crop(c?))),
+                    stream: s.stream,
+                });
+            } else if unread
                 && let Some(w) = ocr.as_mut()
                 && !w.busy()
                 && last_score_ocr.elapsed() >= SCORE_OCR_EVERY
@@ -938,28 +978,59 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
             match (our_side(s.seat, rd.locs.stats, s.stream[0]), fresh) {
                 (Some(side), [Some(a), Some(b)]) => {
                     let ((ours, _), (theirs, _)) = ours_theirs([a, b], side);
-                    if let Some(t) = m.update(ours, theirs) {
-                        let _ = out.send(FromHud::Target(t));
+                    song.match_note = Some(match m.update(ours, theirs) {
+                        Some(t) => {
+                            let _ = out.send(FromHud::Target(t));
+                            format!("following: target {t:.1}%")
+                        }
+                        None => "holding: their score is under 2000 or not rising".into(),
+                    });
+                }
+                (None, _) => song.match_note = Some("waiting: our side is not known yet".into()),
+                _ => {
+                    song.match_note =
+                        Some("waiting: both scores must read (still searching)".into());
+                    if !song.score_warned
+                        && song
+                            .t0
+                            .is_some_and(|t| t.elapsed() > Duration::from_secs(5))
+                    {
+                        song.score_warned = true;
+                        log(
+                            &tx,
+                            Level::Warn,
+                            "match my friend: cannot read both scores yet, holding the target and still searching",
+                        );
                     }
                 }
-                _ if !song.score_warned
-                    && song
-                        .t0
-                        .is_some_and(|t| t.elapsed() > Duration::from_secs(5)) =>
-                {
-                    song.score_warned = true;
-                    log(
-                        &tx,
-                        Level::Warn,
-                        "match my friend: cannot read both scores, holding the target",
-                    );
-                }
-                _ => {}
             }
         }
 
-        if song.t0.is_some() && last_stats_at.elapsed() >= Duration::from_millis(500) {
+        if last_stats_at.elapsed() >= Duration::from_millis(500) {
             last_stats_at = Instant::now();
+            let arr = |r: Option<Rect>| r.map(|r| [r.x, r.y, r.w as i32, r.h as i32]);
+            emit(
+                &tx,
+                EngineEvent::Hud(HudView {
+                    ocr: match &ocr {
+                        None => "off",
+                        Some(w) if !w.ready() => "loading",
+                        Some(_) => "ready",
+                    },
+                    stats: arr(l.stats),
+                    counts: arr(l.counts),
+                    ms: arr(l.ms),
+                    ms_read: song.ms_read,
+                    title: arr(title_rect),
+                    scores: [arr(l.score_left), arr(l.score_right)],
+                    score_values: song.scores.map(|v| v.map(|v| v.0)),
+                    seat: our_side(s.seat, l.stats, s.stream[0]).map(|i| ["left", "right"][i]),
+                    matching: song.match_note.clone(),
+                }),
+            );
+        }
+        if song.t0.is_some() && last_stats_emit.elapsed() >= Duration::from_millis(500) {
+            last_stats_emit = Instant::now();
             let target = song.matcher.as_ref().map(|m| m.target as f32).or(s.target);
             let side = our_side(s.seat, rd.locs.stats, s.stream[0]).unwrap_or(0);
             // the 0 anchor from song start is only shown once the score's region is known

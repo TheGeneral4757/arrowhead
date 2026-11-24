@@ -242,6 +242,8 @@ pub struct Ui {
     pub hud_reader: bool,
     /// OCR model set ("default" = the bundled ocrs models; others live in `models/<name>/`).
     pub ocr_model: String,
+    /// Output the overlay goes on (e.g. "DP-2"); empty: the one matching the capture.
+    pub overlay_output: String,
 }
 
 impl Default for Ui {
@@ -251,6 +253,7 @@ impl Default for Ui {
             minimise_while_playing: AutoOnOff::default(),
             hud_reader: true,
             ocr_model: "default".into(),
+            overlay_output: String::new(),
         }
     }
 }

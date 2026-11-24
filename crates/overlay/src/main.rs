@@ -1,9 +1,10 @@
 //! Click-through overlay process (v0.2, spec 07). The app writes one JSON array of `EngineEvent`s
 //! per line on stdin; the overlay draws them over the game and exits when stdin closes.
 //!
-//! `arrowhead-overlay [--output NAME] [--size WxH]`: NAME is the output (Wayland connector, e.g.
-//! DP-2, or a Windows display name) the game runs on. Without a match, the first output whose
-//! current mode is WxH (the captured stream size) is used, else the first output.
+//! `arrowhead-overlay [--output NAME] [--size WxH] [--hz HZ]`: NAME is the output (Wayland
+//! connector, e.g. DP-2, or a Windows display name) the game runs on. Without a match, the first
+//! output whose current mode is WxH at HZ (the captured stream; tells same-size monitors apart),
+//! else the first at WxH, else the first output.
 
 mod model;
 mod render;
@@ -31,6 +32,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let mut output = None;
     let mut size = None;
+    let mut hz = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--output" => output = args.next(),
@@ -40,9 +42,10 @@ fn main() {
                     Some((w.parse::<i32>().ok()?, h.parse::<i32>().ok()?))
                 })
             }
+            "--hz" => hz = args.next().and_then(|v| v.parse::<f32>().ok()),
             "-h" | "--help" => {
                 eprintln!(
-                    "usage: arrowhead-overlay [--output NAME] [--size WxH]  (JSON event batches on stdin)"
+                    "usage: arrowhead-overlay [--output NAME] [--size WxH] [--hz HZ]  (JSON event batches on stdin)"
                 );
                 return;
             }
@@ -53,12 +56,15 @@ fn main() {
         }
     }
     #[cfg(target_os = "linux")]
-    let res = wayland::run(output, size);
+    let res = wayland::run(output, size, hz);
     #[cfg(windows)]
-    let res = win::run(output, size);
+    let res = {
+        let _ = hz;
+        win::run(output, size)
+    };
     #[cfg(not(any(target_os = "linux", windows)))]
     let res: Result<(), String> = {
-        let _ = (output, size);
+        let _ = (output, size, hz);
         Err("no overlay backend on this OS".into())
     };
     if let Err(e) = res {

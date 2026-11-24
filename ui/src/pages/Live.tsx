@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type Config, type Pipeline } from "../api";
+import { api, type Config, type HudView, type Pipeline } from "../api";
 import { engine, frame, useEngine, type Hit } from "../engine";
 
 const css = (v: string) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -184,6 +184,10 @@ export default function Live({ active }: { active: boolean }) {
   useEffect(() => {
     api.getConfig().then(setCfg, () => {});
   }, [s.running]);
+  const [overlayOn, setOverlayOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    api.overlayShown().then(setOverlayOn, () => {});
+  }, [s.running]);
   const st = s.stats;
   const busy = s.running;
   const scroll = s.layout ? (s.layout.scroll === "up" ? "upscroll" : "downscroll") : null;
@@ -320,6 +324,17 @@ export default function Live({ active }: { active: boolean }) {
           </div>
           <div className="panel">
             <div className="panel-head">
+              <h3>What it sees</h3>
+              <button className="btn" onClick={() => api.toggleOverlay().then(setOverlayOn, () => {})}>
+                {overlayOn ? "Hide overlay" : "Show overlay"}
+              </button>
+            </div>
+            <div className="panel-body">
+              {s.hud ? <Sees v={s.hud} /> : <p className="small muted">What the HUD reader has found, and its last reads, show here while the engine runs.</p>}
+            </div>
+          </div>
+          <div className="panel">
+            <div className="panel-head">
               <h3>Log</h3>
               <span className="note">
                 {s.hotkeys?.bound ? `hotkeys: ${s.hotkeys.bound}` : s.hotkeys?.error ? `hotkeys off: ${s.hotkeys.error}` : ""}
@@ -337,5 +352,38 @@ export default function Live({ active }: { active: boolean }) {
         </div>
       </div>
     </section>
+  );
+}
+
+/** The HUD reader's view: each region found or still searched for, with its last read. */
+function Sees({ v }: { v: HudView }) {
+  const at = (r: HudView["stats"]) => (r ? `at ${r[0]},${r[1]}` : "searching");
+  const side = (i: 0 | 1) => (v.seat === null ? (i === 0 ? "Left score" : "Right score") : (i === 0) === (v.seat === "left") ? "Your score" : "Opponent score");
+  const rows: [string, HudView["stats"], string][] = [
+    ["Stats panel", v.stats, ""],
+    ["Counts", v.counts, ""],
+    ["Your ms readout", v.ms, v.ms_read !== null ? `${v.ms_read.toFixed(2)} ms` : ""],
+    ["Song title", v.title, ""],
+    [side(0), v.scores[0], v.score_values[0] !== null ? String(v.score_values[0]) : ""],
+    [side(1), v.scores[1], v.score_values[1] !== null ? String(v.score_values[1]) : ""],
+  ];
+  return (
+    <>
+      <table className="counts">
+        <tbody>
+          {rows.map(([name, r, read]) => (
+            <tr key={name}>
+              <td>{name}</td>
+              <td className={r ? "num" : "muted"}>{at(r)}</td>
+              <td className="num measured">{read}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="small muted">
+        OCR {v.ocr}; your side {v.seat ?? "not known yet"}
+        {v.matching && <>; match my friend: {v.matching}</>}
+      </p>
+    </>
   );
 }

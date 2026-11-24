@@ -56,6 +56,8 @@ struct AppState {
     /// PNG data URL of the last calibration snapshot.
     snapshot: Mutex<Option<String>>,
     update: Mutex<Option<UpdateInfo>>,
+    /// The overlay runs (Live's toggle; set at each start from `ui.overlay`).
+    overlay_shown: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl AppState {
@@ -226,12 +228,17 @@ fn start_engine(
     let (live, logs) = (state.live.clone(), state.logs.clone());
     let cfg = load_config().unwrap_or_default();
     let prof = load_profile().unwrap_or_default();
+    let output = if cfg.ui.overlay_output.is_empty() {
+        &prof.monitor
+    } else {
+        &cfg.ui.overlay_output
+    };
     let (overlay, overlay_err) = overlay::Overlay::start(
         &app,
         cfg.ui.overlay,
         cfg.ui.minimise_while_playing,
-        &prof.monitor,
-        prof.stream_size,
+        (output, prof.stream_size, prof.refresh_hz),
+        state.overlay_shown.clone(),
     );
     if let Some(e) = overlay_err {
         logs.write(Level::Warn, &format!("overlay not started: {e}"));
@@ -319,6 +326,28 @@ fn with_ctl(state: &AppState, f: impl FnOnce(&Control)) -> CmdRes<()> {
 #[tauri::command]
 fn set_paused(state: tauri::State<AppState>, paused: bool) -> CmdRes<()> {
     with_ctl(&state, |c| c.paused.store(paused, Ordering::SeqCst))
+}
+
+/// Shows or hides the overlay (now, if the engine runs, and from the next start); returns
+/// whether it is shown.
+#[tauri::command]
+fn toggle_overlay(state: tauri::State<AppState>) -> CmdRes<bool> {
+    let shown = !state.overlay_shown.fetch_xor(true, Ordering::SeqCst);
+    // kept for the next start too
+    let mut cfg = load_config().map_err(err)?;
+    cfg.ui.overlay = if shown {
+        arrowhead_core::config::AutoOnOff::On
+    } else {
+        arrowhead_core::config::AutoOnOff::Off
+    };
+    save_config(&cfg)?;
+    Ok(shown)
+}
+
+/// Whether the overlay is shown.
+#[tauri::command]
+fn overlay_shown(state: tauri::State<AppState>) -> bool {
+    state.overlay_shown.load(Ordering::SeqCst)
 }
 
 /// Releases every key and stops (spec 05). Never fails: with no engine there is nothing held.
@@ -827,6 +856,7 @@ fn main() {
             latency_tx: Mutex::default(),
             snapshot: Mutex::default(),
             update: Mutex::default(),
+            overlay_shown: Arc::default(),
         })
         .setup(move |app| {
             let h = app.handle().clone();
@@ -858,6 +888,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             get_status,
+            toggle_overlay,
+            overlay_shown,
             start_engine,
             stop_engine,
             set_paused,

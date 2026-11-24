@@ -1,6 +1,6 @@
 // Engine state for the whole app: one store fed by the event channel, so pages can come and go.
 import { useSyncExternalStore } from "react";
-import { api, type Dot, type EngineEvent, type GameStats, type Judgment, type Pipeline, type Scroll, type SessionState } from "./api";
+import { api, type Dot, type EngineEvent, type GameStats, type HudView, type Judgment, type Pipeline, type Scroll, type SessionState } from "./api";
 
 export type LogLine = { level: "info" | "warn" | "error"; text: string; at: number };
 export type Planned = { id: number; lane: number; at_ms: number };
@@ -22,6 +22,7 @@ type Snapshot = {
   hits: Hit[];
   offset: number | null;
   song: { title: string; difficulty: string } | null;
+  hud: HudView | null;
 };
 
 // Fast-changing data the canvas reads every frame without re-rendering React.
@@ -48,6 +49,7 @@ let snap: Snapshot = {
   hits: [],
   offset: null,
   song: null,
+  hud: null,
 };
 const subs = new Set<() => void>();
 function set(p: Partial<Snapshot>) {
@@ -96,6 +98,12 @@ function onBatch(batch: EngineEvent[]) {
       case "Song":
         p.song = { title: e.title, difficulty: e.difficulty };
         break;
+      case "Hud": {
+        const { type: _h, ...v } = e;
+        void _h;
+        p.hud = v;
+        break;
+      }
       case "Stats": {
         const { type: _t, ...st } = e;
         void _t;
@@ -132,7 +140,7 @@ export const engine = {
   async start(dryRun: boolean) {
     frame.dots = [];
     frame.planned = [];
-    set({ running: true, state: "Searching", dryRun, paused: false, error: null, pipeline: [], logs: [], hotkeys: null, layout: null, stats: null, hits: [], offset: null, song: null });
+    set({ running: true, state: "Searching", dryRun, paused: false, error: null, pipeline: [], logs: [], hotkeys: null, layout: null, stats: null, hits: [], offset: null, song: null, hud: null });
     try {
       await api.startEngine(onBatch, dryRun);
     } catch (e) {

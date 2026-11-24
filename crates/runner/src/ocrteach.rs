@@ -479,7 +479,25 @@ pub fn confirm_ms(cands: &[f32], expected: f32, tol: f32) -> Option<f32> {
 /// gives the row; the region runs from the dark gap after the avatar at the screen edge (OCR
 /// reads the avatar as digits) inwards to the quarter line, as scores grow.
 pub fn score_regions(lines: &Lines, f: &FrameView) -> [Option<Rect>; 2] {
-    let (w, h) = (f.region.w as i32, f.region.h as i32);
+    let stream = [f.region.w, f.region.h];
+    [true, false].map(|left| score_region(lines, f, stream, left))
+}
+
+/// The bottom corner of a `stream`-sized screen where that side's score is (`score_region`
+/// reads only inside it).
+pub fn score_corner(stream: [u32; 2], left: bool) -> Rect {
+    let (w, h) = (stream[0] as i32, stream[1] as i32);
+    Rect::new(
+        if left { 0 } else { w * 3 / 4 },
+        h * 3 / 4,
+        (w / 4) as u32,
+        (h / 4) as u32,
+    )
+}
+
+/// One side of `score_regions`; `f` must hold that side's `score_corner`.
+pub fn score_region(lines: &Lines, f: &FrameView, stream: [u32; 2], left: bool) -> Option<Rect> {
+    let (w, h) = (stream[0] as i32, stream[1] as i32);
     let side = |left: bool| {
         let (_, r) = lines
             .iter()
@@ -488,10 +506,13 @@ pub fn score_regions(lines: &Lines, f: &FrameView) -> [Option<Rect>; 2] {
                 r.y > h * 4 / 5
                     && (if left { c < w / 4 } else { c > w * 3 / 4 })
                     && t.chars().any(|c| repair(c).is_some())
+                    // score digits are about 1/27 of the height; smaller lines are noise
+                    && r.h as i32 >= h / 36
             })
             .max_by_key(|(_, r)| r.y)?;
         let pad = r.h as i32 / 4;
-        let band = Rect::new(0, r.y - pad, 1, r.h + 2 * pad as u32);
+        let band = Rect::new(0, r.y - pad, 1, r.h + 2 * pad as u32)
+            .intersect(&Rect::new(0, f.region.y, 1, f.region.h))?;
         let lit = |x: i32| lit_column(f, band, x);
         // from the edge: the avatar, a gap of at least a fifth of the text height, then the
         // score's first lit column (digits are at most a few px apart)
@@ -516,7 +537,7 @@ pub fn score_regions(lines: &Lines, f: &FrameView) -> [Option<Rect>; 2] {
         let (x0, x1) = if left { (e, w / 4) } else { (w * 3 / 4, e) };
         Some(Rect::new(x0, band.y, (x1 - x0).max(1) as u32, band.h))
     };
-    [side(true), side(false)]
+    side(left)
 }
 
 /// Column `x` of `band` holds bright text (2+ pixels above luma 100).

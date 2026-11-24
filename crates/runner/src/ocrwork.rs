@@ -36,6 +36,11 @@ pub enum Job {
     Title(OwnedFrame),
     /// Read the results screen ("Stats from Last Song") on a full frame.
     Results(OwnedFrame),
+    /// Find the score regions in the bottom corners (`score_corner` crops, `[left, right]`).
+    FindScores {
+        corners: [Option<OwnedFrame>; 2],
+        stream: [u32; 2],
+    },
     /// Read both scores (`[left, right]` crops) in every variant.
     Scores([Option<OwnedFrame>; 2]),
 }
@@ -55,6 +60,12 @@ pub enum Done {
         rect: Rect,
     },
     Title(Option<String>),
+    /// Score regions found by `FindScores`.
+    ScoreRegions([Option<Rect>; 2]),
+    /// The models loaded: jobs can be offered from now on.
+    Ready,
+    /// The models did not load; the worker is gone.
+    Failed(String),
     Results(Option<ResultsRead>),
     /// Scores by screen side, each one only when two OCR passes agree, with the crop it was
     /// read from (to teach the glyph reader).
@@ -65,23 +76,23 @@ pub struct Worker {
     jobs: SyncSender<Job>,
     done: Receiver<Done>,
     busy: bool,
+    ready: bool,
 }
 
 impl Worker {
-    /// Loads the OCR models (`ui.ocr_model`) on the worker thread; `Err` if they are missing.
+    /// Loads the OCR models (`ui.ocr_model`) on the worker thread without waiting for them
+    /// (seconds; much longer in a debug build): `poll` gives `Ready` or `Failed` when done, and
+    /// no job is taken before. The thread is never joined, so stopping never waits on a load.
     pub fn start(model: String) -> Result<Self, String> {
         let (jobs, job_rx) = sync_channel::<Job>(1);
         let (done_tx, done) = sync_channel::<Done>(1);
-        let (ready_tx, ready) = sync_channel::<Result<(), String>>(1);
         std::thread::Builder::new()
             .name("ocr".into())
             .spawn(move || {
                 let ocr = match Ocr::load(&model) {
-                    Ok(o) => {
-                        let _ = ready_tx.send(Ok(()));
-                        o
-                    }
-                    Err(e) => return drop(ready_tx.send(Err(e))),
+                    Ok(o) if done_tx.send(Done::Ready).is_ok() => o,
+                    Ok(_) => return,
+                    Err(e) => return drop(done_tx.send(Done::Failed(e))),
                 };
                 for job in job_rx {
                     if done_tx.send(run(&ocr, job)).is_err() {
@@ -90,11 +101,11 @@ impl Worker {
                 }
             })
             .map_err(|e| e.to_string())?;
-        ready.recv().map_err(|e| e.to_string())??;
         Ok(Self {
             jobs,
             done,
-            busy: false,
+            busy: true,
+            ready: false,
         })
     }
 
@@ -107,6 +118,11 @@ impl Worker {
         self.busy
     }
 
+    /// The models are loaded.
+    pub fn ready(&self) -> bool {
+        self.ready
+    }
+
     pub fn busy(&self) -> bool {
         self.busy
     }
@@ -116,6 +132,7 @@ impl Worker {
         match self.done.try_recv() {
             Ok(d) => {
                 self.busy = false;
+                self.ready |= matches!(d, Done::Ready);
                 Some(d)
             }
             Err(TryRecvError::Empty) => None,
@@ -185,6 +202,16 @@ fn run(ocr: &Ocr, job: Job) -> Done {
                 passes.extend(VARIANTS.iter().map(|&v| ocr.lines(&col.view(), v)));
             }
             Done::Results(ocrteach::results(&passes))
+        }
+        Job::FindScores { corners, stream } => {
+            let mut i = 0;
+            Done::ScoreRegions(corners.map(|c| {
+                let left = i == 0;
+                i += 1;
+                let c = c?;
+                let lines = ocr.lines(&c.view(), Variant::Plain2x);
+                ocrteach::score_region(&lines, &c.view(), stream, left)
+            }))
         }
         Job::Scores(crops) => Done::Scores(crops.map(|c| {
             let c = c?;
@@ -257,6 +284,7 @@ mod tests {
             return;
         };
         let mut w = Worker::start("default".into()).unwrap();
+        assert!(matches!(wait(&mut w), Done::Ready));
         let mut rd = HudReader::new(Atlas::default(), 0.25);
         let mut seen = vec![];
         for item in spec.split(';') {
@@ -285,12 +313,38 @@ mod tests {
                     assert!(rd.teach_score_at(&frame.view(), regions[i].unwrap(), v));
                 }
             }
-            seen.push((frame, regions, want));
+            // the HUD's path: the bottom corners alone find the same score rows
+            let stream = [frame.region.w, frame.region.h];
+            assert!(
+                w.offer(Job::FindScores {
+                    corners: [true, false]
+                        .map(|l| Some(frame.view().crop(ocrteach::score_corner(stream, l)))),
+                    stream,
+                })
+            );
+            let Done::ScoreRegions(corner) = wait(&mut w) else {
+                panic!()
+            };
+            eprintln!("{path}: full {regions:?} corners {corner:?}");
+            for i in 0..2 {
+                // the corner search may miss a lone `0` (the HUD retries all song), never
+                // find another row
+                if let (Some(a), Some(b)) = (regions[i], corner[i]) {
+                    let bottom = |r: Rect| r.y + r.h as i32;
+                    assert!(b.y <= a.y && bottom(b) >= bottom(a) && b.h <= a.h * 3 / 2);
+                    assert!((a.x - b.x).abs() <= 8, "{path}");
+                }
+            }
+            seen.push((frame, regions, corner, want));
         }
         // taught by OCR, the glyph reader reads every frame; unknown digits read as nothing
         let mut read = 0;
-        for (frame, regions, want) in &seen {
+        for (frame, regions, corner, want) in &seen {
             for i in 0..2 {
+                if let Some(c) = corner[i] {
+                    let g = rd.read_score(&frame.view(), c);
+                    assert!(g.is_none() || g == Some(want[i]), "corner {g:?}");
+                }
                 let g = rd.read_score(&frame.view(), regions[i].unwrap());
                 eprintln!("glyph {:?} want {}", g, want[i]);
                 assert!(g.is_none() || g == Some(want[i]));
@@ -311,6 +365,7 @@ mod tests {
         };
         let frame = load_png(std::path::Path::new(&p)).unwrap();
         let mut w = Worker::start("default".into()).unwrap();
+        assert!(matches!(wait(&mut w), Done::Ready));
         assert!(w.offer(Job::Results(frame)));
         let Done::Results(r) = wait(&mut w) else {
             panic!()
@@ -329,6 +384,7 @@ mod tests {
             return;
         };
         let mut w = Worker::start("default".into()).unwrap();
+        assert!(matches!(wait(&mut w), Done::Ready));
         assert!(w.offer(Job::Locate {
             frame: frame.clone(),
             column: Some(Rect::new(870, 0, 820, 1440)),

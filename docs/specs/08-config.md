@@ -73,6 +73,7 @@ margin_pct = 0.0             # where to land against their score, percent of it 
 [ui]
 overlay = "auto"             # auto (single monitor only) | on | off
 minimise_while_playing = "auto"
+overlay_output = ""          # output name for the overlay (e.g. "DP-2"); empty: match the capture's size and rate
 
 [updates]
 check = true

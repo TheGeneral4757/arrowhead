@@ -40,6 +40,7 @@ export type EngineEvent =
   | { type: "Readback"; ms: number; judgment: Judgment; offset_ms: number }
   | ({ type: "Stats" } & GameStats)
   | { type: "Song"; title: string; difficulty: string }
+  | ({ type: "Hud" } & HudView)
   | { type: "Stopped"; error: string | null };
 
 /** HUD totals for the song (spec 07, Stats). `counts`: Sick, Good, Ok, Bad, Miss. `null` = not readable yet. */
@@ -77,6 +78,20 @@ export type Status = {
   update: UpdateInfo | null;
 };
 
+type Region = [number, number, number, number];
+/** What the HUD reader found (spec 07, Hud): regions in stream pixels and the last reads. */
+export type HudView = {
+  ocr: "loading" | "ready" | "off";
+  stats: Region | null;
+  counts: Region | null;
+  ms: Region | null;
+  ms_read: number | null;
+  title: Region | null;
+  scores: [Region | null, Region | null];
+  score_values: [number | null, number | null];
+  seat: "left" | "right" | null;
+  matching: string | null;
+};
 export type Config = {
   version: number;
   profile: string;
@@ -93,7 +108,7 @@ export type Config = {
     seat: "auto" | "left" | "right";
   };
   match_friend: { on: boolean; margin_pct: number };
-  ui: { overlay: AutoOnOff; minimise_while_playing: AutoOnOff; hud_reader: boolean; ocr_model: string };
+  ui: { overlay: AutoOnOff; minimise_while_playing: AutoOnOff; hud_reader: boolean; ocr_model: string; overlay_output: string };
   updates: { check: boolean };
   log: { level: string; per_note: boolean };
 };
@@ -187,6 +202,8 @@ export const api = {
   stopEngine: () => invoke<void>("stop_engine"),
   setPaused: (paused: boolean) => invoke<void>("set_paused", { paused }),
   panic: () => invoke<void>("panic"),
+  toggleOverlay: () => invoke<boolean>("toggle_overlay"),
+  overlayShown: () => invoke<boolean>("overlay_shown"),
   setDryRun: (dryRun: boolean) => invoke<void>("set_dry_run", { dryRun }),
   getConfig: () => invoke<Config>("get_config"),
   /** Deep-merges `patch` into the config, saves it and returns the result. */

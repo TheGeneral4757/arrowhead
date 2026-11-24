@@ -172,6 +172,9 @@ export default function Settings({ update }: { update: UpdateInfo | null }) {
                 <option value="right">Right</option>
               </select>
             </Row>
+            <Row title="Overlay monitor" note="Output name (e.g. DP-2) the overlay goes on. Empty: the one that matches the capture's size and refresh rate. Applies from the next start.">
+              <Field label="Overlay monitor" mono value={cfg.ui.overlay_output} onSave={(v) => save({ ui: { overlay_output: v.trim() } })} />
+            </Row>
             <Row title="Overlay over the game" note="Click-through lanes, presses and hit errors. Auto shows it only on a single-monitor setup. Applies from the next start.">
               <select aria-label="Overlay" value={cfg.ui.overlay} onChange={(e) => save({ ui: { overlay: e.target.value as Config["ui"]["overlay"] } })}>
                 <option value="auto">Auto</option>
