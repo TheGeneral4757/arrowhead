@@ -77,6 +77,8 @@ export default function Style() {
   const [draft, setDraft] = useState<StyleT | null>(null);
   const [preview, setPreview] = useState<StylePreview | null>(null);
   const [windows, setWindows] = useState<Config["game"]["windows_ms"] | null>(null);
+  const [mf, setMf] = useState<Config["match_friend"] | null>(null);
+  const saveMf = (p: Partial<Config["match_friend"]>) => api.setConfig({ match_friend: p }).then((c) => setMf(c.match_friend));
   const [saveAs, setSaveAs] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -89,6 +91,7 @@ export default function Style() {
         setDraft(cur);
         setSaveAs(customName(cur.name));
         setWindows(cfg.game.windows_ms);
+        setMf(cfg.match_friend);
       },
       (e) => setMsg(String(e)),
     );
@@ -165,6 +168,25 @@ export default function Style() {
               />
               {isMax && <p className="note">Max aims every press at the centre of the window. Pick another preset to set a target.</p>}
             </div>
+            {mf && !isMax && (
+              <div className="target-row">
+                <label>
+                  <input type="checkbox" checked={mf.on} onChange={(e) => saveMf({ on: e.target.checked })} /> Match my friend
+                </label>
+                <span className="num">{mf.margin_pct > 0 ? "+" : ""}{mf.margin_pct.toFixed(1)}%</span>
+                <input
+                  type="range"
+                  aria-label="Margin against their score"
+                  min={-3}
+                  max={3}
+                  step={0.5}
+                  value={mf.margin_pct}
+                  disabled={!mf.on}
+                  onChange={(e) => saveMf({ margin_pct: Number(e.target.value) })}
+                />
+                <p className="note">Moves the target so your score ends this far from your opponent's. Applies from the next start.</p>
+              </div>
+            )}
           </div>
         </div>
 

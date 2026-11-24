@@ -36,6 +36,7 @@ pub struct Config {
     pub ui: Ui,
     pub updates: Updates,
     pub log: Log,
+    pub match_friend: MatchFriend,
 }
 
 impl Default for Config {
@@ -53,6 +54,7 @@ impl Default for Config {
             ui: Ui::default(),
             updates: Updates::default(),
             log: Log::default(),
+            match_friend: MatchFriend::default(),
         }
     }
 }
@@ -196,6 +198,8 @@ pub struct Game {
     pub windows_ms: Windows,
     pub accuracy_weights: AccuracyWeights,
     pub readback_sign: i8,
+    /// Which side of the stage we play on: our score, stats and counts are on that side.
+    pub seat: Seat,
 }
 
 impl Default for Game {
@@ -215,6 +219,7 @@ impl Default for Game {
                 miss: 0.0,
             },
             readback_sign: -1,
+            seat: Seat::Auto,
         }
     }
 }
@@ -276,6 +281,25 @@ impl Default for Log {
             per_note: false,
         }
     }
+}
+
+/// Our side of the stage (spec 03): `auto` takes the side the stats panel is on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Seat {
+    #[default]
+    Auto,
+    Left,
+    Right,
+}
+
+/// Match my friend (spec 06): the target follows the opponent's score.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MatchFriend {
+    pub on: bool,
+    /// Where to land against their score, percent of it (-3 to +3).
+    pub margin_pct: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

@@ -10,6 +10,7 @@ pub mod frame;
 pub mod hud;
 pub mod input;
 pub mod plan;
+pub mod rival;
 pub mod runtime;
 pub mod sched;
 pub mod session;

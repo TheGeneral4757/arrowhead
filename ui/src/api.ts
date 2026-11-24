@@ -50,6 +50,8 @@ export type GameStats = {
   ur: number | null;
   readbacks: number;
   target: number | null;
+  score_self: number | null;
+  score_opponent: number | null;
 };
 
 export type SourceInfo = {
@@ -88,7 +90,9 @@ export type Config = {
     windows_ms: { sick: number; good: number; ok: number; bad: number };
     accuracy_weights: { sick: number; good: number; ok: number; bad: number; miss: number };
     readback_sign: number;
+    seat: "auto" | "left" | "right";
   };
+  match_friend: { on: boolean; margin_pct: number };
   ui: { overlay: AutoOnOff; minimise_while_playing: AutoOnOff; hud_reader: boolean; ocr_model: string };
   updates: { check: boolean };
   log: { level: string; per_note: boolean };

@@ -13,7 +13,8 @@ use std::time::{Duration, Instant, SystemTime};
 use arrowhead_core::adapt::{Bias, Class, Judged, MaxNote};
 use arrowhead_core::adapt::{PlayRecord, SongBook};
 use arrowhead_core::config::{
-    HistoryEntry, HitHist, Profile, Windows, append_history, data_dir, load_toml, save_toml,
+    HistoryEntry, HitHist, MatchFriend, Profile, Seat, Windows, append_history, data_dir,
+    load_toml, save_toml,
 };
 use arrowhead_core::event::{EngineEvent, Level, Stats};
 use arrowhead_core::frame::{AuxTap, OwnedFrame, Rect};
@@ -21,6 +22,7 @@ use arrowhead_core::hud::readback::{Readback, SentPress};
 use arrowhead_core::hud::{
     Atlas, Counts, Face, HudReader, Layout, Locations, ResultsRead, StatsRead,
 };
+use arrowhead_core::rival::{Matcher, our_side, ours_theirs};
 use arrowhead_core::time::Nanos;
 
 use crate::{Tx, emit, log};
@@ -73,6 +75,9 @@ pub struct HudSetup {
     pub seed: u64,
     /// `ui.ocr_model`: the OCR model set that teaches the glyph reader and reads song titles.
     pub ocr_model: String,
+    /// `game.seat`: which side of the screen we play on (our score).
+    pub seat: Seat,
+    pub match_friend: MatchFriend,
 }
 
 /// Every 8th frame: about 20 Hz at 165 Hz.
@@ -80,6 +85,11 @@ const EVERY: u32 = 8;
 /// Full frames while something is still unknown, at the rate `locate` runs (about 2 Hz at
 /// 165 Hz): each is a full-stream copy on the capture thread, so none is taken for nothing.
 const EVERY_FULL: u32 = 80;
+/// Scores: OCR at most this often when the glyph reader cannot read one; the matcher's update
+/// rate; how long the score regions are searched for at song start (full frames slow readback).
+const SCORE_OCR_EVERY: Duration = Duration::from_secs(2);
+const MATCH_EVERY: Duration = Duration::from_secs(1);
+const SCORE_HUNT: Duration = Duration::from_secs(15);
 const HIST_FROM_MS: f32 = -240.0;
 const HIST_BIN_MS: f32 = 10.0;
 const HIST_BINS: usize = 48;
@@ -107,6 +117,22 @@ struct Song {
     key: Option<String>,
     name: String,
     difficulty: String,
+    /// Last trusted score by screen side, and when it was read.
+    scores: [Option<(i32, Instant)>; 2],
+    /// Match my friend: the target that follows the opponent, while on.
+    matcher: Option<Matcher>,
+    last_match: Option<Instant>,
+    score_warned: bool,
+}
+
+/// Keep `v` as side's score when it is a move the score can make since the last trusted one.
+fn accept_score(slot: &mut Option<(i32, Instant)>, v: i32) -> bool {
+    let ok =
+        slot.is_none_or(|(p, t)| crate::ocrteach::plausible_score(p, v, t.elapsed().as_secs_f32()));
+    if ok {
+        *slot = Some((v, Instant::now()));
+    }
+    ok
 }
 
 /// How long after a song the results screen is waited for, and how often it is read.
@@ -265,6 +291,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
     let (mut seq, mut last_pts, mut last_stats_at) = (0u64, Nanos(0), Instant::now());
     let mut requested: Vec<Rect> = vec![];
     let mut last_locate = Instant::now() - Duration::from_secs(10);
+    let mut last_score_ocr = Instant::now() - SCORE_OCR_EVERY;
     let mut dirty_atlas = false;
     let mut title_rect: Option<Rect> = s
         .hud
@@ -329,8 +356,19 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                         started: Some(SystemTime::now()),
                         t0: Some(Instant::now()),
                         title_wanted: ocr.is_some(),
+                        scores: [Some((0, Instant::now())); 2],
+                        matcher: s.target.filter(|_| s.match_friend.on).map(|t| {
+                            Matcher::new(f64::from(s.match_friend.margin_pct), f64::from(t))
+                        }),
                         ..Song::default()
                     };
+                    if s.match_friend.on && s.target.is_none() {
+                        log(
+                            &tx,
+                            Level::Warn,
+                            "match my friend: off for Max (no target to move)",
+                        );
+                    }
                     // Each song starts with a fast average from the offset it ended on.
                     let sign = rb.sign;
                     rb = Readback::new(rb.bias_ms);
@@ -422,11 +460,24 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
         // Ask for what we need: full frames until the stats, counts and our ms readout are
         // found, then just their rects.
         let l = rd.locs;
-        let known: Vec<Rect> = [l.stats, l.counts, l.ms, title_rect]
-            .into_iter()
-            .flatten()
-            .collect();
-        let need_full = l.stats.is_none()
+        let known: Vec<Rect> = [
+            l.stats,
+            l.counts,
+            l.ms,
+            title_rect,
+            l.score_left,
+            l.score_right,
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        // score regions are only hunted for when matching, and only early in a song
+        let hunt_scores = song.matcher.is_some()
+            && ocr.is_some()
+            && (l.score_left.is_none() || l.score_right.is_none())
+            && song.t0.is_some_and(|t| t.elapsed() < SCORE_HUNT);
+        let need_full = hunt_scores
+            || l.stats.is_none()
             || l.counts.is_none()
             || l.ms.is_none()
             || (ocr.is_some() && title_rect.is_none())
@@ -480,12 +531,14 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
         if let Some(d) = ocr.as_mut().and_then(|w| w.poll()) {
             use crate::ocrwork::Done;
             match d {
-                Done::Lines(lines) => {
+                Done::Lines(lines, [sl, sr]) => {
                     let found = crate::ocrteach::locate(&lines, rd.playfield, s.stream[0]);
                     let before = (rd.locs, title_rect);
                     rd.locs.stats = rd.locs.stats.or(found.stats);
                     rd.locs.counts = rd.locs.counts.or(found.counts);
                     rd.locs.ms = rd.locs.ms.or(found.ms);
+                    rd.locs.score_left = rd.locs.score_left.or(sl);
+                    rd.locs.score_right = rd.locs.score_right.or(sr);
                     title_rect = title_rect.or(found.title);
                     if (rd.locs, title_rect) != before {
                         save_regions_with_title(&s, &rd.locs, title_rect, &tx);
@@ -515,7 +568,8 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                     }
                     song.applied = (start.lane_ms, start.class_ms);
                     let _ = out.send(FromHud::Corrections(start.lane_ms, start.class_ms));
-                    if let Some(t) = s.target {
+                    // matching moves the target itself
+                    if let Some(t) = s.target.filter(|_| song.matcher.is_none()) {
                         let _ = out.send(FromHud::Target(f64::from(t) + start.target_adjust));
                     }
                     let plays = book.get(&key).map_or(0, |g| g.plays);
@@ -629,6 +683,24 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                     }
                 }
                 Done::Results(None) => {}
+                Done::Scores(read) => {
+                    for (i, r) in read.into_iter().enumerate() {
+                        if let Some((v, crop)) = r
+                            && accept_score(&mut song.scores[i], v)
+                            && rd.teach_score_at(&crop.view(), crop.region, v)
+                        {
+                            dirty_atlas = true;
+                            log(
+                                &tx,
+                                Level::Info,
+                                format!(
+                                    "HUD: learned score digits from {v}; score font knows '{}'",
+                                    rd.atlas.chars(Face::Score)
+                                ),
+                            );
+                        }
+                    }
+                }
             }
         }
         if let Some(p) = pending.as_mut()
@@ -829,9 +901,82 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
         }
         last_pts = pts;
 
+        // Scores: glyph reads each tick, OCR when one does not read (it also teaches the font).
+        if song.t0.is_some() {
+            let mut unread = false;
+            let mut crops: [Option<OwnedFrame>; 2] = [None, None];
+            for (i, r) in [l.score_left, l.score_right].into_iter().enumerate() {
+                let Some(r) = r else { continue };
+                let Some(f) = holding(&frames, r) else {
+                    continue;
+                };
+                let ok = rd
+                    .read_score(&f.view(), r)
+                    .is_some_and(|v| accept_score(&mut song.scores[i], v));
+                if !ok {
+                    unread = true;
+                    crops[i] = Some(f.view().crop(r));
+                }
+            }
+            if unread
+                && let Some(w) = ocr.as_mut()
+                && !w.busy()
+                && last_score_ocr.elapsed() >= SCORE_OCR_EVERY
+            {
+                last_score_ocr = Instant::now();
+                w.offer(crate::ocrwork::Job::Scores(crops));
+            }
+        }
+        // Match my friend: about once a second, on fresh scores.
+        if let Some(m) = song.matcher.as_mut()
+            && song.last_match.is_none_or(|t| t.elapsed() >= MATCH_EVERY)
+        {
+            song.last_match = Some(Instant::now());
+            let fresh = song
+                .scores
+                .map(|s| s.filter(|(_, t)| t.elapsed() < Duration::from_millis(1500)));
+            match (our_side(s.seat, rd.locs.stats, s.stream[0]), fresh) {
+                (Some(side), [Some(a), Some(b)]) => {
+                    let ((ours, _), (theirs, _)) = ours_theirs([a, b], side);
+                    if let Some(t) = m.update(ours, theirs) {
+                        let _ = out.send(FromHud::Target(t));
+                    }
+                }
+                _ if !song.score_warned
+                    && song
+                        .t0
+                        .is_some_and(|t| t.elapsed() > Duration::from_secs(5)) =>
+                {
+                    song.score_warned = true;
+                    log(
+                        &tx,
+                        Level::Warn,
+                        "match my friend: cannot read both scores, holding the target",
+                    );
+                }
+                _ => {}
+            }
+        }
+
         if song.t0.is_some() && last_stats_at.elapsed() >= Duration::from_millis(500) {
             last_stats_at = Instant::now();
-            emit(&tx, EngineEvent::Stats(stats_of(&song, s.target)));
+            let target = song.matcher.as_ref().map(|m| m.target as f32).or(s.target);
+            let side = our_side(s.seat, rd.locs.stats, s.stream[0]).unwrap_or(0);
+            // the 0 anchor from song start is only shown once the score's region is known
+            let known = [l.score_left.is_some(), l.score_right.is_some()];
+            let mut shown = [None; 2];
+            for i in 0..2 {
+                shown[i] = song.scores[i].filter(|_| known[i]).map(|v| v.0);
+            }
+            let (ours, theirs) = ours_theirs(shown, side);
+            emit(
+                &tx,
+                EngineEvent::Stats(Stats {
+                    score_self: ours,
+                    score_opponent: theirs,
+                    ..stats_of(&song, target)
+                }),
+            );
         }
     }
 }
@@ -846,6 +991,8 @@ fn stats_of(song: &Song, target: Option<f32>) -> Stats {
         ur,
         readbacks: song.hit_errs.len() as u32,
         target,
+        score_self: None,
+        score_opponent: None,
     }
 }
 

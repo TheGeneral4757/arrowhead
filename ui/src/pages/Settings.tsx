@@ -165,6 +165,13 @@ export default function Settings({ update }: { update: UpdateInfo | null }) {
             <Row title="Read the game's HUD" note="Accuracy, judgment counts and ms readouts, which tune the offset as you play. Turn off to compare scanning fps. Applies from the next start.">
               <Switch label="Read the game's HUD" checked={cfg.ui.hud_reader} onChange={(v) => save({ ui: { hud_reader: v } })} />
             </Row>
+            <Row title="Your side" note="Which score is yours. Auto: the side the stats panel is on. Applies from the next start.">
+              <select aria-label="Your side" value={cfg.game.seat} onChange={(e) => save({ game: { seat: e.target.value as Config["game"]["seat"] } })}>
+                <option value="auto">Auto</option>
+                <option value="left">Left</option>
+                <option value="right">Right</option>
+              </select>
+            </Row>
             <Row title="Overlay over the game" note="Click-through lanes, presses and hit errors. Auto shows it only on a single-monitor setup. Applies from the next start.">
               <select aria-label="Overlay" value={cfg.ui.overlay} onChange={(e) => save({ ui: { overlay: e.target.value as Config["ui"]["overlay"] } })}>
                 <option value="auto">Auto</option>

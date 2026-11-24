@@ -68,6 +68,7 @@ UI: target slider + preset picker up front; everything above in the Advanced dra
 - Reads the opponent's score (and accuracy, if the HUD shows it) from the HUD ([03](03-detection.md)).
 - `target = opponent_accuracy + margin` (margin -3% to +3%), clamped to [70, 100]. If only scores are readable: same controller on score ratio instead of accuracy, with `margin` in percent of their score.
 - If the opponent's numbers are unreadable for 5 s, hold the last target and show a warning.
+- Built (v0.2, `core::rival::Matcher`): the HUD shows no opponent accuracy, so it runs on scores. Scores add up over the song and the game's formula is unknown, so it steers the rate of the gap: aim = theirs * (1 + margin/100), gap = aim - ours; each update (about 1 s, both scores read in the last 1.5 s) the gap should shrink by gap/20, and the target moves by 4 * (rate error / their rate), at most 1 point per update, clamped to [70, 100]. It holds while aim < 2000 or their score is not rising. Off for Max (no target). While on, the per-song target adjust from `songs.json` is not applied. Config `[match_friend] on, margin_pct`; scores need the score regions (spec 03).
 
 ## Self-check (shown on Live and in History)
 - Hit error from readback, or from planned error when there is no readback.

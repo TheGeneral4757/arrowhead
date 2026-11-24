@@ -827,6 +827,19 @@ impl HudReader {
         ok
     }
 
+    /// Like `teach_ms_at`, for a score (OCR confirmed it); kept only if it then reads back.
+    pub fn teach_score_at(&mut self, f: &FrameView, r: Rect, score: i32) -> bool {
+        let backup = self.atlas.clone();
+        let ok = self
+            .teach_lines(f, Face::Score, &[&score.to_string()], Some(r))
+            .is_ok()
+            && self.read_score(f, r) == Some(score);
+        if !ok {
+            self.atlas = backup;
+        }
+        ok
+    }
+
     /// Teach stand-alone lines (ms readout, scores) from their text. Lines are the frame's
     /// bright text lines whose cell count matches; with several texts of equal length the
     /// tallest lines are taken, left to right. `hint` limits the search to lines inside it

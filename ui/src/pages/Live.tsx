@@ -240,6 +240,11 @@ export default function Live({ active }: { active: boolean }) {
                     <span className="acc measured num">{st.accuracy !== null ? `${st.accuracy.toFixed(2)}%` : "-"}</span>
                     {st.target !== null && <span className="note">target <span className="num accent">{st.target.toFixed(1)}%</span></span>}
                   </div>
+                  {(st.score_self !== null || st.score_opponent !== null) && (
+                    <p className="note">
+                      score <span className="num measured">{st.score_self ?? "-"}</span> vs opponent <span className="num">{st.score_opponent ?? "-"}</span>
+                    </p>
+                  )}
                   <div className="judges">
                     {JUDGE.map((k, i) => (
                       <div key={k} className="judge">

@@ -64,6 +64,11 @@ min_gap_ms = 10
 windows_ms = { sick = 45, good = 80, ok = 130, bad = 230 }
 accuracy_weights = { sick = 1.0, good = 0.75, ok = 0.5, bad = 0.25, miss = 0.0 } # rough feed-forward only: real accuracy is not count-weighted (G2)
 readback_sign = -1           # game shows late as negative ms (confirmed, G4)
+seat = "auto"                # auto (side of the stats panel) | left | right: which score is ours
+
+[match_friend]               # spec 06; off for Max
+on = false
+margin_pct = 0.0             # where to land against their score, percent of it (-3 to +3)
 
 [ui]
 overlay = "auto"             # auto (single monitor only) | on | off

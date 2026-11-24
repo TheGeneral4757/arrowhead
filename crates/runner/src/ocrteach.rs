@@ -3,7 +3,7 @@
 //! only trusted when it parses after repair, at least two OCR passes agree on it, and the
 //! panel's arithmetic holds (Hits = Sick + Good + Ok + Bad, Misses = Miss).
 
-use arrowhead_core::frame::Rect;
+use arrowhead_core::frame::{FrameView, Rect};
 use arrowhead_core::hud::{Counts, ResultsRead, StatsRead};
 
 pub type Lines = [(String, Rect)];
@@ -475,6 +475,129 @@ pub fn confirm_ms(cands: &[f32], expected: f32, tol: f32) -> Option<f32> {
     fit.all(|c| (c - first).abs() < 0.005).then_some(first)
 }
 
+/// Score regions `[left, right]`: the lowest text line in the outer quarter of each side
+/// gives the row; the region runs from the dark gap after the avatar at the screen edge (OCR
+/// reads the avatar as digits) inwards to the quarter line, as scores grow.
+pub fn score_regions(lines: &Lines, f: &FrameView) -> [Option<Rect>; 2] {
+    let (w, h) = (f.region.w as i32, f.region.h as i32);
+    let side = |left: bool| {
+        let (_, r) = lines
+            .iter()
+            .filter(|(t, r)| {
+                let c = r.x + r.w as i32 / 2;
+                r.y > h * 4 / 5
+                    && (if left { c < w / 4 } else { c > w * 3 / 4 })
+                    && t.chars().any(|c| repair(c).is_some())
+            })
+            .max_by_key(|(_, r)| r.y)?;
+        let pad = r.h as i32 / 4;
+        let band = Rect::new(0, r.y - pad, 1, r.h + 2 * pad as u32);
+        let lit = |x: i32| lit_column(f, band, x);
+        // from the edge: the avatar, a gap of at least a fifth of the text height, then the
+        // score's first lit column (digits are at most a few px apart)
+        let gap = (r.h as i32 / 5).max(6);
+        let xs: Box<dyn Iterator<Item = i32>> = if left {
+            Box::new(0..w / 4)
+        } else {
+            Box::new((w * 3 / 4..w).rev())
+        };
+        let (mut seen, mut dark, mut edge) = (false, 0, None);
+        for x in xs {
+            if !lit(x) {
+                dark += 1;
+            } else if seen && dark >= gap {
+                edge = Some(if left { x - 4 } else { x + 5 });
+                break;
+            } else {
+                (seen, dark) = (true, 0);
+            }
+        }
+        let e = edge?;
+        let (x0, x1) = if left { (e, w / 4) } else { (w * 3 / 4, e) };
+        Some(Rect::new(x0, band.y, (x1 - x0).max(1) as u32, band.h))
+    };
+    [side(true), side(false)]
+}
+
+/// Column `x` of `band` holds bright text (2+ pixels above luma 100).
+fn lit_column(f: &FrameView, band: Rect, x: i32) -> bool {
+    (band.y..band.y + band.h as i32)
+        .filter(|&y| {
+            let (cr, cg, cb) = f.px(x, y);
+            (cr as u32 + 2 * cg as u32 + cb as u32) / 4 > 100
+        })
+        .count()
+        >= 2
+}
+
+/// Does `v` fit the lit text on the score crop `f`? Its length must match the text's width (a
+/// glyph is about 0.75 text heights wide, and a third of the crop is padding), so a read that
+/// drops or adds characters (`-19543` as `9543`) fails; and its sign must match the first
+/// glyph: a minus is a flat stroke, under 0.4 text heights tall, where digits are nearly full
+/// height (OCR merges `-1` into `2`: `-10230` as `210230`).
+pub fn score_fits(f: &FrameView, v: i32) -> bool {
+    let r = f.region;
+    let text_h = r.h as f32 / 1.5;
+    let mut xs = (r.x..r.x + r.w as i32).filter(|&x| lit_column(f, r, x));
+    let Some(a) = xs.next() else { return false };
+    let b = xs.next_back().unwrap_or(a);
+    let est = (b - a + 1) as f32 / (0.75 * text_h);
+    let lit_rows: Vec<i32> = (r.y..r.y + r.h as i32)
+        .filter(|&y| {
+            (a..(a + (0.3 * text_h) as i32).min(b + 1)).any(|x| {
+                let (cr, cg, cb) = f.px(x, y);
+                (cr as u32 + 2 * cg as u32 + cb as u32) / 4 > 100
+            })
+        })
+        .collect();
+    let tall = lit_rows
+        .last()
+        .zip(lit_rows.first())
+        .map_or(0, |(z, a)| z - a + 1);
+    let minus = (tall as f32) < 0.4 * text_h;
+    (v.to_string().len() as f32 - est).abs() <= 1.0 && minus == (v < 0)
+}
+
+/// A score as OCR read it: the widest line (OCR adds small stray marks) is one signed integer,
+/// look-alikes repaired.
+pub fn score_value(lines: &Lines) -> Option<i32> {
+    let (t, _) = lines.iter().max_by_key(|(_, r)| r.w)?;
+    let v = digits(t.trim())?;
+    let ok = v
+        .char_indices()
+        .all(|(i, c)| c.is_ascii_digit() || (c == '-' && i == 0));
+    ok.then(|| v.parse().ok()).flatten()
+}
+
+/// OCR's two ways of losing the minus before the game font's `1` (the minus is seen in the
+/// pixels, so a positive read is wrong): the minus reads as `2` (`-10230` as `210230`), or the
+/// `-1` vanishes (`-19543` as `9543`). Candidates still have to fit the crop and agree with
+/// another pass.
+pub fn minus_one_repairs(v: i32) -> impl Iterator<Item = i32> {
+    let s = v.to_string();
+    let merged = s.strip_prefix('2').map(|r| format!("-{r}"));
+    let dropped = (v >= 0).then(|| format!("-1{s}"));
+    [merged, dropped]
+        .into_iter()
+        .flatten()
+        .filter_map(|t| t.parse().ok())
+}
+
+/// The score to trust: a value at least two OCR passes agree on.
+pub fn confirm_score(cands: &[i32]) -> Option<i32> {
+    cands
+        .iter()
+        .copied()
+        .find(|v| cands.iter().filter(|c| *c == v).count() >= 2)
+}
+
+/// Can a score have gone from `prev` to `v` in `secs`? Two OCR passes can agree on a misread
+/// (`-10230` as `210230`: the minus and the 1 merge into a 2), so a read must also follow on
+/// from the last trusted one. 10k points a second is above any chart's rate.
+pub fn plausible_score(prev: i32, v: i32, secs: f32) -> bool {
+    ((v as i64 - prev as i64).abs() as f32) <= 1000.0 + 10_000.0 * secs
+}
+
 /// Mean colour of the saturated bright pixels in `r` (coloured text; the white of values and
 /// the dark outline are left out). `None` with too few such pixels.
 pub fn text_colour(f: &arrowhead_core::frame::FrameView, r: Rect) -> Option<[f32; 3]> {
@@ -525,6 +648,23 @@ pub fn judgment_by_colour(rgb: [f32; 3], labels: &[[f32; 3]; 5]) -> Option<usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn score_helpers() {
+        let l = |t: &str, w| (t.to_string(), Rect::new(0, 0, w, 10));
+        // the widest line, repaired; a stray mark is ignored
+        assert_eq!(score_value(&[l("T", 4), l("-3998", 40)]), Some(-3998));
+        assert_eq!(score_value(&[l("12-3", 40)]), None);
+        let reps: Vec<i32> = minus_one_repairs(210230).collect();
+        assert_eq!(reps, vec![-10230, -1210230]);
+        assert_eq!(minus_one_repairs(9543).collect::<Vec<_>>(), vec![-19543]);
+        assert_eq!(minus_one_repairs(-5).count(), 0);
+        assert_eq!(confirm_score(&[5, 7, 7]), Some(7));
+        assert_eq!(confirm_score(&[5, 7]), None);
+        assert!(plausible_score(0, 900, 0.0));
+        assert!(!plausible_score(0, 210230, 2.0));
+        assert!(plausible_score(-10000, -10230, 0.1));
+    }
 
     fn l(t: &str, y: i32) -> (String, Rect) {
         (t.to_string(), Rect::new(10, y, 200, 20))

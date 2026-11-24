@@ -104,8 +104,11 @@ pub struct Stats {
     pub mean_err_ms: Option<f32>,
     pub ur: Option<f32>,
     pub readbacks: u32,
-    /// The style's target, percent; None for Max.
+    /// The style's target, percent; None for Max. Moves with the opponent in match my friend.
     pub target: Option<f32>,
+    /// Scores the game shows, ours and the opponent's (by our side of the stage).
+    pub score_self: Option<i32>,
+    pub score_opponent: Option<i32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]

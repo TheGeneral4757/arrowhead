@@ -522,6 +522,8 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
             target: style_target,
             seed,
             ocr_model: cfg.ui.ocr_model.clone(),
+            seat: cfg.game.seat,
+            match_friend: cfg.match_friend.clone(),
         },
         hud_rx,
         from_hud_tx,

@@ -36,10 +36,13 @@ pub enum Job {
     Title(OwnedFrame),
     /// Read the results screen ("Stats from Last Song") on a full frame.
     Results(OwnedFrame),
+    /// Read both scores (`[left, right]` crops) in every variant.
+    Scores([Option<OwnedFrame>; 2]),
 }
 
 pub enum Done {
-    Lines(Vec<(String, Rect)>),
+    /// OCR lines and the score regions (`[left, right]`) found from them.
+    Lines(Vec<(String, Rect)>, [Option<Rect>; 2]),
     Teach {
         stats: Vec<StatsRead>,
         counts: Vec<Counts>,
@@ -53,6 +56,9 @@ pub enum Done {
     },
     Title(Option<String>),
     Results(Option<ResultsRead>),
+    /// Scores by screen side, each one only when two OCR passes agree, with the crop it was
+    /// read from (to teach the glyph reader).
+    Scores([Option<(i32, OwnedFrame)>; 2]),
 }
 
 pub struct Worker {
@@ -128,7 +134,8 @@ fn run(ocr: &Ocr, job: Job) -> Done {
             if let Some(c) = column.and_then(|c| frame.region.intersect(&c)) {
                 lines.extend(ocr.lines(&frame.view().crop(c).view(), Variant::Plain2x));
             }
-            Done::Lines(lines)
+            let scores = ocrteach::score_regions(&lines, &frame.view());
+            Done::Lines(lines, scores)
         }
         Job::Teach { stats, counts } => Done::Teach {
             stats: VARIANTS
@@ -179,6 +186,20 @@ fn run(ocr: &Ocr, job: Job) -> Done {
             }
             Done::Results(ocrteach::results(&passes))
         }
+        Job::Scores(crops) => Done::Scores(crops.map(|c| {
+            let c = c?;
+            let f = c.view();
+            let cands: Vec<i32> = VARIANTS
+                .iter()
+                .filter_map(|&v| ocrteach::score_value(&ocr.lines(&f, v)))
+                .filter_map(|v| {
+                    std::iter::once(v)
+                        .chain(ocrteach::minus_one_repairs(v))
+                        .find(|&v| ocrteach::score_fits(&f, v))
+                })
+                .collect();
+            Some((ocrteach::confirm_score(&cands)?, c))
+        })),
         Job::Title(f) => Done::Title(
             ocr.lines(&f.view(), Variant::Plain2x)
                 .into_iter()
@@ -225,6 +246,60 @@ mod tests {
         }
     }
 
+    /// `ARROWHEAD_TEST_SCORES`: `path.png=left,right;...` (the user's frames, local only).
+    #[test]
+    fn ocr_reads_scores_on_real_frames() {
+        let (Some(spec), true) = (
+            std::env::var("ARROWHEAD_TEST_SCORES").ok(),
+            arrowhead_ocr::find_models("default").is_some(),
+        ) else {
+            eprintln!("skipped: set ARROWHEAD_TEST_SCORES and have the OCR models");
+            return;
+        };
+        let mut w = Worker::start("default".into()).unwrap();
+        let mut rd = HudReader::new(Atlas::default(), 0.25);
+        let mut seen = vec![];
+        for item in spec.split(';') {
+            let (path, want) = item.split_once('=').unwrap();
+            let want: Vec<i32> = want.split(',').map(|v| v.parse().unwrap()).collect();
+            let frame = load_png(std::path::Path::new(path)).unwrap();
+            assert!(w.offer(Job::Locate {
+                frame: frame.clone(),
+                column: None,
+            }));
+            let Done::Lines(_, regions) = wait(&mut w) else {
+                panic!()
+            };
+            assert!(w.offer(Job::Scores(
+                regions.map(|r| r.map(|r| frame.view().crop(r)))
+            )));
+            let Done::Scores(got) = wait(&mut w) else {
+                panic!()
+            };
+            eprintln!("{path}: OCR scores {got:?}");
+            for i in 0..2 {
+                // OCR may give up, never misread
+                let got = got[i].as_ref().map(|g| g.0);
+                assert!(got.is_none() || got == Some(want[i]), "{path}: {got:?}");
+                if let Some(v) = got {
+                    assert!(rd.teach_score_at(&frame.view(), regions[i].unwrap(), v));
+                }
+            }
+            seen.push((frame, regions, want));
+        }
+        // taught by OCR, the glyph reader reads every frame; unknown digits read as nothing
+        let mut read = 0;
+        for (frame, regions, want) in &seen {
+            for i in 0..2 {
+                let g = rd.read_score(&frame.view(), regions[i].unwrap());
+                eprintln!("glyph {:?} want {}", g, want[i]);
+                assert!(g.is_none() || g == Some(want[i]));
+                read += g.is_some() as u32;
+            }
+        }
+        assert!(read as usize >= seen.len(), "glyph reads {read}");
+    }
+
     #[test]
     fn ocr_reads_a_results_screen() {
         let (Some(p), true) = (
@@ -258,7 +333,7 @@ mod tests {
             frame: frame.clone(),
             column: Some(Rect::new(870, 0, 820, 1440)),
         }));
-        let Done::Lines(lines) = wait(&mut w) else {
+        let Done::Lines(lines, _) = wait(&mut w) else {
             panic!()
         };
         // our playfield on the user's 2560x1440 screen (test only)
