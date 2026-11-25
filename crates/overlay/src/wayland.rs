@@ -199,6 +199,7 @@ pub fn run(
     output: Option<String>,
     size: Option<(i32, i32)>,
     hz: Option<f32>,
+    debug: bool,
 ) -> Result<(), String> {
     let conn = Connection::connect_to_env().map_err(|e| format!("no Wayland display: {e}"))?;
     let (globals, queue) = registry_queue_init::<App>(&conn).map_err(|e| e.to_string())?;
@@ -216,7 +217,10 @@ pub fn run(
         shm,
         layer: None,
         _region: None,
-        draw: Draw::default(),
+        draw: Draw {
+            debug,
+            ..Draw::default()
+        },
         pm: None,
         size: (0, 0),
         scale: 1,

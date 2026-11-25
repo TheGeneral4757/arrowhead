@@ -76,6 +76,8 @@ pub struct Draw {
     pub errors: VecDeque<f32>,
     /// HUD regions to outline, with labels: (rect in stream pixels, label).
     pub hud: Vec<([i32; 4], String)>,
+    /// `--debug`: also draw lanes, receptors, planned ticks and HUD outlines (never in a run).
+    pub debug: bool,
 }
 
 impl Draw {

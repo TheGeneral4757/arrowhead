@@ -22,8 +22,9 @@ pub struct Overlay {
     shown: Arc<AtomicBool>,
     /// `--output`, `--size`, `--hz` for a restart.
     args: (String, [u32; 2], f32),
-    /// The last State and Layout, replayed to a restarted child (it draws nothing without).
-    replay: [Option<Value>; 2],
+    /// The last State, Layout and Hud, replayed to a restarted child (it draws nothing without
+    /// the first two, and needs the HUD regions to keep clear of them).
+    replay: [Option<Value>; 3],
     win: Option<WebviewWindow>,
     minimise: AutoOnOff,
     /// One monitor: the overlay covers the main window, so Auto minimises it.
@@ -46,7 +47,7 @@ fn binary() -> Option<PathBuf> {
 }
 
 /// Whether the overlay should run: `on`, or `auto` with a single monitor.
-fn wanted(mode: AutoOnOff, monitors: usize) -> bool {
+pub fn wanted(mode: AutoOnOff, monitors: usize) -> bool {
     match mode {
         AutoOnOff::On => true,
         AutoOnOff::Auto => monitors == 1,
@@ -128,7 +129,7 @@ impl Overlay {
                 tx,
                 shown,
                 args: (output.to_string(), size, hz),
-                replay: [None, None],
+                replay: [None, None, None],
                 win: app.get_webview_window("main"),
                 minimise,
                 single: monitors == 1,
@@ -155,8 +156,13 @@ impl Overlay {
             }
             _ => {}
         }
-        if let EngineEvent::State { .. } | EngineEvent::Layout { .. } = e {
-            let i = usize::from(matches!(e, EngineEvent::Layout { .. }));
+        let slot = match e {
+            EngineEvent::State { .. } => Some(0),
+            EngineEvent::Layout { .. } => Some(1),
+            EngineEvent::Hud(_) => Some(2),
+            _ => None,
+        };
+        if let Some(i) = slot {
             self.replay[i] = serde_json::to_value(e).ok();
         }
         if self.tx.is_some()

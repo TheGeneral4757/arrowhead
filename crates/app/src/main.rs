@@ -384,11 +384,23 @@ fn merge(a: &mut serde_json::Value, b: serde_json::Value) {
 }
 
 #[tauri::command]
-fn set_config(state: tauri::State<AppState>, patch: serde_json::Value) -> CmdRes<Config> {
+fn set_config(
+    app: AppHandle,
+    state: tauri::State<AppState>,
+    patch: serde_json::Value,
+) -> CmdRes<Config> {
+    let overlay_set = patch.pointer("/ui/overlay").is_some();
     let mut v = serde_json::to_value(load_config().map_err(err)?).map_err(err)?;
     merge(&mut v, patch);
     let cfg: Config = serde_json::from_value(v).map_err(err)?;
     save_config(&cfg)?;
+    // Like Live's toggle: a running engine's overlay child starts or stops now; the run goes on.
+    if overlay_set {
+        let monitors = app.available_monitors().map_or(1, |m| m.len());
+        state
+            .overlay_shown
+            .store(overlay::wanted(cfg.ui.overlay, monitors), Ordering::SeqCst);
+    }
     *state.logs.min.lock().unwrap() = bus::parse_level(&cfg.log.level);
     Ok(cfg)
 }

@@ -4,7 +4,8 @@
 //! `arrowhead-overlay [--output NAME] [--size WxH] [--hz HZ]`: NAME is the output (Wayland
 //! connector, e.g. DP-2, or a Windows display name) the game runs on. Without a match, the first
 //! output whose current mode is WxH at HZ (the captured stream; tells same-size monitors apart),
-//! else the first at WxH, else the first output.
+//! else the first at WxH, else the first output. `--debug` also draws lanes, receptors, planned
+//! ticks and HUD outlines; the app never passes it, since they cover what the engine reads.
 
 mod model;
 mod render;
@@ -33,6 +34,7 @@ fn main() {
     let mut output = None;
     let mut size = None;
     let mut hz = None;
+    let mut debug = false;
     while let Some(a) = args.next() {
         match a.as_str() {
             "--output" => output = args.next(),
@@ -43,9 +45,10 @@ fn main() {
                 })
             }
             "--hz" => hz = args.next().and_then(|v| v.parse::<f32>().ok()),
+            "--debug" => debug = true,
             "-h" | "--help" => {
                 eprintln!(
-                    "usage: arrowhead-overlay [--output NAME] [--size WxH] [--hz HZ]  (JSON event batches on stdin)"
+                    "usage: arrowhead-overlay [--output NAME] [--size WxH] [--hz HZ] [--debug]  (JSON event batches on stdin)"
                 );
                 return;
             }
@@ -56,15 +59,15 @@ fn main() {
         }
     }
     #[cfg(target_os = "linux")]
-    let res = wayland::run(output, size, hz);
+    let res = wayland::run(output, size, hz, debug);
     #[cfg(windows)]
     let res = {
         let _ = hz;
-        win::run(output, size)
+        win::run(output, size, debug)
     };
     #[cfg(not(any(target_os = "linux", windows)))]
     let res: Result<(), String> = {
-        let _ = (output, size, hz);
+        let _ = (output, size, hz, debug);
         Err("no overlay backend on this OS".into())
     };
     if let Err(e) = res {

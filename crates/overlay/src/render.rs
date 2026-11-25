@@ -139,27 +139,117 @@ pub fn state_label(state: State, dry_run: bool) -> (&'static str, [u8; 3]) {
     }
 }
 
+/// Panel size in UI units: state pill and judgment on one row, the hit error bar below.
+const PANEL_W: f32 = 440.0;
+const PANEL_H: f32 = 72.0;
+
+fn overlaps(a: [f32; 4], b: [f32; 4]) -> f32 {
+    let w = (a[0] + a[2]).min(b[0] + b[2]) - a[0].max(b[0]);
+    let h = (a[1] + a[3]).min(b[1] + b[3]) - a[1].max(b[1]);
+    w.max(0.0) * h.max(0.0)
+}
+
+/// Where the panel goes (surface px, top-left): the first of top-left, top-right, top-centre,
+/// bottom-centre that covers no HUD region and not our playfield, else the one that covers
+/// least. The game is read from what is under it (spec 13, 2.1).
+fn panel_at(d: &Draw, pw: f32, ph: f32, u: f32) -> (f32, f32) {
+    let (w, h, m) = (PANEL_W * u, PANEL_H * u, 16.0 * u);
+    let mut keep_out: Vec<[f32; 4]> = vec![];
+    if let Some(l) = d.layout.as_ref().filter(|l| l.stream[0] > 0) {
+        let s = pw / l.stream[0] as f32;
+        for (r, _) in &d.hud {
+            keep_out.push(r.map(|v| v as f32 * s));
+        }
+        let xs = l.receptors.map(|r| r[0] * s);
+        let lo = xs.iter().copied().fold(f32::MAX, f32::min) - l.size * s;
+        let hi = xs.iter().copied().fold(f32::MIN, f32::max) + l.size * s;
+        keep_out.push([lo, 0.0, hi - lo, ph]);
+    }
+    let spots = [
+        (m, m),
+        (pw - w - m, m),
+        ((pw - w) / 2.0, m),
+        ((pw - w) / 2.0, ph - h - m),
+    ];
+    let cost =
+        |&(x, y): &(f32, f32)| -> f32 { keep_out.iter().map(|k| overlaps([x, y, w, h], *k)).sum() };
+    spots
+        .iter()
+        .find(|p| cost(p) == 0.0)
+        .or_else(|| spots.iter().min_by(|a, b| cost(a).total_cmp(&cost(b))))
+        .copied()
+        .unwrap_or((m, m))
+}
+
 /// Clears `pm` and draws `d`. `pm` is the whole surface in physical pixels.
 pub fn render(d: &Draw, pm: &mut Pixmap) {
     pm.fill(Color::TRANSPARENT);
     let pw = pm.width() as f32;
+    let ph = pm.height() as f32;
     // UI sizing follows the surface, not the stream.
     let u = (pw / 1920.0).max(0.75);
 
+    if d.debug {
+        debug_marks(d, pm, u);
+    }
+
+    let (x0, y0) = panel_at(d, pw, ph, u);
+    let pill_h = 26.0 * u;
+    let mut jx = x0;
     if let Some((state, dry)) = d.state {
         let (label, c) = state_label(state, dry);
         let px = 2.0 * u;
-        let (w, h) = (text_w(label, px) + 24.0 * u, 7.0 * px + 12.0 * u);
-        let (x, y) = (16.0 * u, 16.0 * u);
-        fill(pm, x, y, w, h, col(PAPER, 0.8));
-        fill(pm, x, y, 4.0 * u, h, col(c, 1.0));
-        text(pm, label, x + 14.0 * u, y + 6.0 * u, px, col(c, 1.0));
+        let w = text_w(label, px) + 24.0 * u;
+        fill(pm, x0, y0, w, pill_h, col(PAPER, 0.8));
+        fill(pm, x0, y0, 4.0 * u, pill_h, col(c, 1.0));
+        text(pm, label, x0 + 14.0 * u, y0 + 6.0 * u, px, col(c, 1.0));
+        jx = x0 + w + 12.0 * u;
     }
 
+    if let Some(j) = &d.judgment {
+        let px = 3.0 * u;
+        let w = text_w(j, px) + 16.0 * u;
+        fill(pm, jx, y0, w, pill_h, col(PAPER, 0.8));
+        text(
+            pm,
+            j,
+            jx + 8.0 * u,
+            y0 + (pill_h - 7.0 * px) / 2.0,
+            px,
+            col(judge_colour(j), 1.0),
+        );
+    }
+
+    if !d.errors.is_empty() {
+        let (w, h) = (PANEL_W * u, 22.0 * u);
+        let y = y0 + pill_h + 16.0 * u;
+        let mid = x0 + w / 2.0;
+        fill(pm, x0, y + h / 2.0 - 3.0 * u, w, 6.0 * u, col(PAPER, 0.7));
+        fill(
+            pm,
+            mid - u,
+            y - 4.0 * u,
+            2.0 * u,
+            h + 8.0 * u,
+            col(INK, 0.9),
+        );
+        let n = d.errors.len();
+        for (i, e) in d.errors.iter().enumerate() {
+            let f = (e / BAR_MS).clamp(-1.0, 1.0);
+            let a = 0.25 + 0.75 * (i + 1) as f32 / n as f32;
+            fill(pm, mid + f * w / 2.0 - 1.5 * u, y, 3.0 * u, h, col(COOL, a));
+        }
+    }
+}
+
+/// `--debug` only, never during a real run: lane strips, receptor marks, planned ticks and
+/// the HUD regions with labels. They cover what the engine reads.
+fn debug_marks(d: &Draw, pm: &mut Pixmap, u: f32) {
     let Some(l) = &d.layout else { return };
     if l.stream[0] == 0 {
         return;
     }
+    let pw = pm.width() as f32;
     let s = pw / l.stream[0] as f32;
     let ph = pm.height() as f32;
     let (size, up) = (l.size * s, l.scroll == Scroll::Up);
@@ -168,7 +258,6 @@ pub fn render(d: &Draw, pm: &mut Pixmap) {
         ..Stroke::default()
     };
 
-    // What the HUD reader found: an outline and a label above each region.
     for (r, label) in &d.hud {
         let (x, y, w, h) = (
             r[0] as f32 * s,
@@ -216,7 +305,6 @@ pub fn render(d: &Draw, pm: &mut Pixmap) {
                 None,
             );
         }
-        // Receptor mark.
         let mut pb = PathBuilder::new();
         pb.push_circle(cx, cy, size / 2.0);
         if let Some(path) = pb.finish() {
@@ -227,7 +315,6 @@ pub fn render(d: &Draw, pm: &mut Pixmap) {
         }
     }
 
-    // Planned press ticks: a bar on the far side of the receptor.
     for &(_, lane, _) in &d.planned {
         if let Some(r) = l.receptors.get(lane as usize) {
             let (cx, cy) = (r[0] * s, r[1] * s);
@@ -238,42 +325,6 @@ pub fn render(d: &Draw, pm: &mut Pixmap) {
                 cy + size * 0.8
             };
             fill(pm, cx - size * 0.4, y, size * 0.8, h, col(INK, 0.9));
-        }
-    }
-
-    let mid = l.receptors.iter().map(|r| r[0]).sum::<f32>() / 4.0 * s;
-    let ry = l.receptors[0][1] * s;
-
-    if let Some(j) = &d.judgment {
-        let px = 4.0 * u;
-        let y = if up { ry - size * 2.2 } else { ry + size * 2.2 } - 3.5 * px;
-        text(
-            pm,
-            j,
-            mid - text_w(j, px) / 2.0,
-            y,
-            px,
-            col(judge_colour(j), 1.0),
-        );
-    }
-
-    if !d.errors.is_empty() {
-        let (w, h) = (420.0 * u, 22.0 * u);
-        let (x, y) = (mid - w / 2.0, ph - 70.0 * u);
-        fill(pm, x, y + h / 2.0 - 3.0 * u, w, 6.0 * u, col(PAPER, 0.7));
-        fill(
-            pm,
-            mid - u,
-            y - 4.0 * u,
-            2.0 * u,
-            h + 8.0 * u,
-            col(INK, 0.9),
-        );
-        let n = d.errors.len();
-        for (i, e) in d.errors.iter().enumerate() {
-            let f = (e / BAR_MS).clamp(-1.0, 1.0);
-            let a = 0.25 + 0.75 * (i + 1) as f32 / n as f32;
-            fill(pm, mid + f * w / 2.0 - 1.5 * u, y, 3.0 * u, h, col(COOL, a));
         }
     }
 }
@@ -312,24 +363,51 @@ mod tests {
         [p.red(), p.green(), p.blue(), p.alpha()]
     }
 
-    #[test]
-    fn strips_and_receptors_at_stream_scale() {
-        let d = drawn();
-        let mut pm = Pixmap::new(1000, 600).unwrap();
-        render(&d, &mut pm);
-        // Inside lane 1's strip, below the receptor: faint lane colour.
-        let p = px(&pm, 400, 400);
-        assert!(p[3] > 10 && p[3] < 60, "{p:?}");
-        // Between strips and above the receptors (scroll up): untouched.
-        assert_eq!(px(&pm, 450, 400)[3], 0);
-        assert_eq!(px(&pm, 400, 100)[3], 0);
-        // Receptor ring on the left edge of lane 2.
-        assert!(px(&pm, 470, 200)[3] > 200);
+    fn debug(mut d: Draw) -> Draw {
+        d.debug = true;
+        d
+    }
+
+    /// Every pixel in our playfield column (receptors +- size, at 2x) is untouched.
+    fn playfield_clear(pm: &Pixmap) -> bool {
+        (0..pm.height()).all(|y| (680..=1520).all(|x| px(pm, x, y)[3] == 0))
     }
 
     #[test]
-    fn scales_to_a_bigger_surface() {
-        let d = drawn();
+    fn run_draws_nothing_over_the_playfield_or_hud() {
+        let mut d = drawn();
+        d.hud = vec![([0, 0, 200, 60], "stats".into())];
+        d.apply(Msg::State {
+            state: State::Playing,
+            dry_run: false,
+        });
+        d.apply(Msg::Planned {
+            id: 7,
+            lane: 0,
+            at_ms: 10.0,
+        });
+        d.apply(Msg::Readback {
+            ms: 50.0,
+            judgment: "sick".into(),
+        });
+        let mut pm = Pixmap::new(2000, 1200).unwrap();
+        render(&d, &mut pm);
+        assert!(playfield_clear(&pm));
+        // the stats region in the top-left is avoided too
+        assert!((0..120).all(|y| (0..400).all(|x| px(&pm, x, y)[3] == 0)));
+        // the pill went top-right, the free corner
+        assert!((1520..2000).any(|x| px(&pm, x, 25)[3] > 200));
+    }
+
+    #[test]
+    fn debug_strips_and_receptors_at_stream_scale() {
+        let d = debug(drawn());
+        let mut pm = Pixmap::new(1000, 600).unwrap();
+        render(&d, &mut pm);
+        let p = px(&pm, 400, 400);
+        assert!(p[3] > 10 && p[3] < 60, "{p:?}");
+        assert_eq!(px(&pm, 450, 400)[3], 0);
+        assert!(px(&pm, 470, 200)[3] > 200);
         let mut pm = Pixmap::new(2000, 1200).unwrap();
         render(&d, &mut pm);
         assert!(px(&pm, 800, 800)[3] > 10);
@@ -337,8 +415,8 @@ mod tests {
     }
 
     #[test]
-    fn planned_tick_until_pressed() {
-        let mut d = drawn();
+    fn debug_planned_tick_until_pressed() {
+        let mut d = debug(drawn());
         let mut pm = Pixmap::new(1000, 600).unwrap();
         d.apply(Msg::Planned {
             id: 7,
@@ -346,7 +424,6 @@ mod tests {
             at_ms: 10.0,
         });
         render(&d, &mut pm);
-        // 0.8 * size above the receptor, scroll up.
         assert!(px(&pm, 400, 200 - 48 - 2)[3] > 200);
         d.apply(Msg::Pressed { id: 7 });
         render(&d, &mut pm);
@@ -354,8 +431,8 @@ mod tests {
     }
 
     #[test]
-    fn pill_judgment_and_error_bar() {
-        let mut d = drawn();
+    fn pill_judgment_and_error_bar_in_the_panel() {
+        let mut d = Draw::default();
         d.apply(Msg::State {
             state: State::Playing,
             dry_run: false,
@@ -366,14 +443,12 @@ mod tests {
         });
         let mut pm = Pixmap::new(1000, 600).unwrap();
         render(&d, &mut pm);
-        // u = 0.75 here (surface narrower than 1920). Pill edge at x = 12, y = 12.
+        // u = 0.75; nothing known, so top-left at 12, 12
         assert_eq!(&px(&pm, 13, 20)[..3], &[0x61, 0xCB, 0x7C]);
-        // +50 ms is a quarter bar right of the centre line (mid 550, bar 315 wide).
-        let x = (550.0 + 0.5 * 315.0 / 2.0) as u32;
-        assert!(px(&pm, x, 600 - 53 + 8)[3] > 200);
-        // Judgment text: an opaque pixel somewhere in its row band above the receptors.
-        let y = (200.0 - 60.0 * 2.2 - 3.5 * 3.0) as u32 + 8;
-        assert!((0..1000).any(|x| px(&pm, x, y)[3] > 200));
+        // bar: y = 12 + 19.5 + 12 = 43.5, 16.5 high; +50 ms is a quarter right of the middle
+        let (w, mid) = (440.0 * 0.75, 12.0 + 440.0 * 0.75 / 2.0);
+        let x = (mid + 0.5 * w / 2.0) as u32;
+        assert!(px(&pm, x, 50)[3] > 200);
     }
 
     #[test]

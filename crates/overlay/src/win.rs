@@ -179,7 +179,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     }
 }
 
-pub fn run(output: Option<String>, size: Option<(i32, i32)>) -> Result<(), String> {
+pub fn run(output: Option<String>, size: Option<(i32, i32)>, debug: bool) -> Result<(), String> {
     unsafe {
         // Physical pixels, like the captured stream.
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -266,7 +266,10 @@ pub fn run(output: Option<String>, size: Option<(i32, i32)>) -> Result<(), Strin
             bits: bits as *mut u8,
             mem,
             pm: Pixmap::new(w as u32, h as u32).ok_or("bad monitor size")?,
-            draw: Draw::default(),
+            draw: Draw {
+                debug,
+                ..Draw::default()
+            },
             dirty: true,
             last: Instant::now() - Duration::from_secs(1),
             // Monitor refresh, capped at 30 Hz: each redraw copies a full-monitor buffer.

@@ -42,6 +42,8 @@ Status (2026-11-25): built. 1.2 is `core/src/hud/guard.rs`: a contradiction must
 | 1.5 | Results Mean MS as a strong readback sample: the whole-song mean from the results screen (font-free, every hit) nudges the saved offset when it passes the checks in 4.3 | `runner/src/hud.rs` (`finish_song`) | Offset converges to the results-screen mean over 2-3 songs |
 
 ### Phase 2: the overlay must not touch what we read (v0.2 blocker)
+Status (2026-11-25): built. The run overlay is one panel (pill, judgment, error bar) placed clear of the playfield and every HUD region; lanes, receptors, ticks and outlines need `--debug`. Settings' overlay select now acts at once like Live's toggle. Check on a real desktop: `detect` on a clip recorded with the overlay on.
+
 | # | Change | Where | Done when |
 |---|---|---|---|
 | 2.1 | Draw nothing over the lanes, receptors or HUD regions during a run: no lane strips, receptor circles, planned ticks or region labels. Keep the status pill, judgment and error bar in free screen space | `overlay/src/render.rs`, spec 07 | `detect` calibrates on a clip recorded with the overlay on |

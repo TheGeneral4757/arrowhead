@@ -1486,7 +1486,9 @@ mod tests {
         assert_eq!(offset_target(&song, -1.0, None), Some(-1.0));
         assert!((step_toward(2.58, -1.0) - 1.58).abs() < 1e-5);
         // wide spread: not trusted
-        song.resid = (0..40).map(|i| if i % 2 == 0 { -30.0 } else { 30.0 }).collect();
+        song.resid = (0..40)
+            .map(|i| if i % 2 == 0 { -30.0 } else { 30.0 })
+            .collect();
         assert_eq!(offset_target(&song, -1.0, None), None);
         // results Mean MS -4.0 (4 ms late) over 700 hits at +2.58 in force: -1.42
         song.counts = Some(Counts {
