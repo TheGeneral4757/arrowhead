@@ -2,6 +2,8 @@
 
 ## [0.2.0](https://github.com/TheGeneral4757/arrowhead/compare/v0.1.0...v0.2.0) (2026-11-25)
 
+arrowhead now reads the game's own HUD: it learns the stats panel, your ms readout and the results screen, tunes its timing from what the game says, names each song and writes exact results into History. You can play like a person with style presets and a target accuracy, or match a friend's score, and an optional overlay shows state, judgments and hit errors without covering what it reads. This release also fixes missed hold notes, early misses at song start and timing drift at song rates other than 1.00x, adds a Linux AppImage that updates itself, a full user guide, and a Windows build (MSI and zip) that has not yet been tested on real hardware.
+
 
 ### Features
 
