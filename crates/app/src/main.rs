@@ -5,6 +5,7 @@
 //! `arrowhead-runner`, the same one `arrowhead-cli run` drives.
 
 mod bus;
+mod overlay;
 
 use std::sync::atomic::Ordering;
 use std::sync::mpsc;
@@ -12,13 +13,16 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use arrowhead_core::config::{Config, Nudge, Profile, config_dir, data_dir, load_toml, save_toml};
+use arrowhead_core::config::{
+    Config, HistoryEntry, Nudge, Profile, config_dir, data_dir, load_toml, read_history, save_toml,
+};
 use arrowhead_core::detect::Layout;
 use arrowhead_core::event::{EngineEvent, Level};
 use arrowhead_core::frame::{FrameSource, OwnedFrame, SourceInfo};
 use arrowhead_core::input::{KeyAction, key_names};
 use arrowhead_core::runtime::platform::{EXIT, install_exit_hooks};
 use arrowhead_core::session::State;
+use arrowhead_core::style::{self, Preview, Style, StylePlayer};
 use arrowhead_core::time::{Clock, Nanos, RealClock};
 use arrowhead_runner::{Control, Opts, load_config, profile_path};
 use serde::Serialize;
@@ -52,6 +56,8 @@ struct AppState {
     /// PNG data URL of the last calibration snapshot.
     snapshot: Mutex<Option<String>>,
     update: Mutex<Option<UpdateInfo>>,
+    /// The overlay runs (Live's toggle; set at each start from `ui.overlay`).
+    overlay_shown: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl AppState {
@@ -99,7 +105,20 @@ fn open_source(fresh: bool) -> CmdRes<Src> {
     Ok(Box::new(PipewireSource::open(&token).map_err(err)?))
 }
 
-#[cfg(not(target_os = "linux"))]
+/// Windows: DXGI / WGC by `capture.windows_backend`; there is no picker, so `fresh` is unused.
+#[cfg(windows)]
+fn open_source(_: bool) -> CmdRes<Src> {
+    let cfg = load_config().map_err(err)?;
+    Ok(Box::new(
+        arrowhead_capture::WindowsSource::open(
+            cfg.capture.windows_backend,
+            cfg.safety.game_window_classes,
+        )
+        .map_err(err)?,
+    ))
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 fn open_source(_: bool) -> CmdRes<Src> {
     Err("screen capture on this OS arrives in v0.2".into())
 }
@@ -128,7 +147,7 @@ async fn with_src<T: Send + 'static>(
 fn log_tx(logs: &Arc<LogFile>) -> arrowhead_runner::Tx {
     let (tx, rx) = mpsc::sync_channel(1024);
     let logs = logs.clone();
-    std::thread::spawn(move || bus::run(rx, None, Arc::default(), logs));
+    std::thread::spawn(move || bus::run(rx, None, Arc::default(), logs, None));
     tx
 }
 
@@ -190,6 +209,7 @@ fn get_status(state: tauri::State<AppState>) -> Status {
 
 #[tauri::command]
 fn start_engine(
+    app: AppHandle,
     state: tauri::State<AppState>,
     on_event: Channel<Vec<EngineEvent>>,
     dry_run: bool,
@@ -206,9 +226,26 @@ fn start_engine(
     };
     let (tx, rx) = mpsc::sync_channel::<EngineEvent>(4096);
     let (live, logs) = (state.live.clone(), state.logs.clone());
+    let cfg = load_config().unwrap_or_default();
+    let prof = load_profile().unwrap_or_default();
+    let output = if cfg.ui.overlay_output.is_empty() {
+        &prof.monitor
+    } else {
+        &cfg.ui.overlay_output
+    };
+    let (overlay, overlay_err) = overlay::Overlay::start(
+        &app,
+        cfg.ui.overlay,
+        cfg.ui.minimise_while_playing,
+        (output, prof.stream_size, prof.refresh_hz),
+        state.overlay_shown.clone(),
+    );
+    if let Some(e) = overlay_err {
+        logs.write(Level::Warn, &format!("overlay not started: {e}"));
+    }
     std::thread::Builder::new()
         .name("bus".into())
-        .spawn(move || bus::run(rx, Some(on_event), live, logs))
+        .spawn(move || bus::run(rx, Some(on_event), live, logs, Some(overlay)))
         .map_err(err)?;
     let (src, c2, live) = (state.src.clone(), ctl.clone(), state.live.clone());
     let join = std::thread::Builder::new()
@@ -219,11 +256,13 @@ fn start_engine(
                 if g.is_none() {
                     *g = Some(open_source(false)?);
                 }
-                // Without a writable uinput only dry runs are possible.
-                let live_keys = std::fs::OpenOptions::new()
-                    .write(true)
-                    .open("/dev/uinput")
-                    .is_ok();
+                // Linux: without a writable uinput only dry runs are possible. Windows sends
+                // keys with SendInput, which needs no device.
+                let live_keys = cfg!(windows)
+                    || std::fs::OpenOptions::new()
+                        .write(true)
+                        .open("/dev/uinput")
+                        .is_ok();
                 if !live_keys {
                     arrowhead_runner::log(
                         &tx,
@@ -291,6 +330,28 @@ fn set_paused(state: tauri::State<AppState>, paused: bool) -> CmdRes<()> {
     with_ctl(&state, |c| c.paused.store(paused, Ordering::SeqCst))
 }
 
+/// Shows or hides the overlay (now, if the engine runs, and from the next start); returns
+/// whether it is shown.
+#[tauri::command]
+fn toggle_overlay(state: tauri::State<AppState>) -> CmdRes<bool> {
+    let shown = !state.overlay_shown.fetch_xor(true, Ordering::SeqCst);
+    // kept for the next start too
+    let mut cfg = load_config().map_err(err)?;
+    cfg.ui.overlay = if shown {
+        arrowhead_core::config::AutoOnOff::On
+    } else {
+        arrowhead_core::config::AutoOnOff::Off
+    };
+    save_config(&cfg)?;
+    Ok(shown)
+}
+
+/// Whether the overlay is shown.
+#[tauri::command]
+fn overlay_shown(state: tauri::State<AppState>) -> bool {
+    state.overlay_shown.load(Ordering::SeqCst)
+}
+
 /// Releases every key and stops (spec 05). Never fails: with no engine there is nothing held.
 #[tauri::command]
 fn panic(state: tauri::State<AppState>) {
@@ -325,11 +386,23 @@ fn merge(a: &mut serde_json::Value, b: serde_json::Value) {
 }
 
 #[tauri::command]
-fn set_config(state: tauri::State<AppState>, patch: serde_json::Value) -> CmdRes<Config> {
+fn set_config(
+    app: AppHandle,
+    state: tauri::State<AppState>,
+    patch: serde_json::Value,
+) -> CmdRes<Config> {
+    let overlay_set = patch.pointer("/ui/overlay").is_some();
     let mut v = serde_json::to_value(load_config().map_err(err)?).map_err(err)?;
     merge(&mut v, patch);
     let cfg: Config = serde_json::from_value(v).map_err(err)?;
     save_config(&cfg)?;
+    // Like Live's toggle: a running engine's overlay child starts or stops now; the run goes on.
+    if overlay_set {
+        let monitors = app.available_monitors().map_or(1, |m| m.len());
+        state
+            .overlay_shown
+            .store(overlay::wanted(cfg.ui.overlay, monitors), Ordering::SeqCst);
+    }
     *state.logs.min.lock().unwrap() = bus::parse_level(&cfg.log.level);
     Ok(cfg)
 }
@@ -373,6 +446,60 @@ fn load_profile() -> CmdRes<Profile> {
 #[tauri::command]
 fn get_profile() -> CmdRes<Profile> {
     load_profile()
+}
+
+#[tauri::command]
+fn list_styles() -> Vec<Style> {
+    config_dir().map_or_else(Style::builtins, |d| style::list_styles(&d))
+}
+
+/// Makes `name` the active style (`config.toml` `style`). A running engine picks it up at its
+/// next start.
+#[tauri::command]
+fn select_style(name: String) -> CmdRes<()> {
+    let dir = config_dir().ok_or("no config dir")?;
+    if style::find_style(Some(&dir), &name).name != name {
+        return Err(format!("no style named {name:?}"));
+    }
+    let mut cfg = load_config().map_err(err)?;
+    cfg.style = name;
+    save_config(&cfg)
+}
+
+/// Saves a user style (built-in names are refused) and makes it the active one.
+#[tauri::command]
+fn save_style(style: Style) -> CmdRes<()> {
+    let dir = config_dir().ok_or("no config dir")?;
+    style::save_style(&dir, &style).map_err(err)?;
+    select_style(style.name)
+}
+
+#[tauri::command]
+fn delete_style(name: String) -> CmdRes<()> {
+    let dir = config_dir().ok_or("no config dir")?;
+    style::delete_style(&dir, &name).map_err(err)?;
+    let mut cfg = load_config().map_err(err)?;
+    if cfg.style == name {
+        cfg.style = "Max".into();
+        save_config(&cfg)?;
+    }
+    Ok(())
+}
+
+/// Expected judgments for a style (not saved), with this config's windows and weights.
+#[tauri::command]
+fn style_preview(style: Style) -> CmdRes<Preview> {
+    let cfg = load_config().map_err(err)?;
+    Ok(StylePlayer::new(style, &cfg.game, 0, 600).preview())
+}
+
+/// Newest first.
+#[tauri::command]
+fn history(limit: usize, offset: usize) -> CmdRes<Vec<HistoryEntry>> {
+    let Some(dir) = data_dir() else {
+        return Ok(Vec::new());
+    };
+    read_history(&dir.join("history.jsonl"), limit.min(1000), offset).map_err(err)
 }
 
 #[derive(Serialize)]
@@ -723,6 +850,7 @@ async fn install_update(app: AppHandle, state: tauri::State<'_, AppState>) -> Cm
 }
 
 fn main() {
+    arrowhead_ocr::limit_threads();
     // A panic anywhere sets EXIT, which stops the engine and releases keys (S2); so do signals.
     install_exit_hooks();
     let cfg = load_config().unwrap_or_default();
@@ -742,6 +870,7 @@ fn main() {
             latency_tx: Mutex::default(),
             snapshot: Mutex::default(),
             update: Mutex::default(),
+            overlay_shown: Arc::default(),
         })
         .setup(move |app| {
             let h = app.handle().clone();
@@ -773,6 +902,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             get_status,
+            toggle_overlay,
+            overlay_shown,
             start_engine,
             stop_engine,
             set_paused,
@@ -783,6 +914,12 @@ fn main() {
             list_profiles,
             select_profile,
             get_profile,
+            history,
+            list_styles,
+            select_style,
+            save_style,
+            delete_style,
+            style_preview,
             run_setup_step,
             latency_key,
             test_lane,

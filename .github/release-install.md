@@ -11,7 +11,9 @@ sha256sum -c --ignore-missing SHA256SUMS
 tar xzf arrowhead-@VERSION@-linux-x86_64.tar.gz && cd arrowhead-@VERSION@-linux-x86_64 && ./arrowhead
 ```
 
-Needs webkit2gtk-4.1, libsoup3, gtk3, pipewire, xdg-desktop-portal (+ the KDE or Hyprland backend) and a writable `/dev/uinput`. See the [README](https://github.com/TheGeneral4757/arrowhead#install) for first-run setup. The `.sig` file is the in-app updater's signature.
+**Windows 10/11:** download `arrowhead-@VERSION@-windows-x86_64.msi` (installer, updates in-app) or the `.zip` (portable) from the assets below.
+
+Linux needs webkit2gtk-4.1, libsoup3, gtk3, pipewire, xdg-desktop-portal (+ the KDE or Hyprland backend) and a writable `/dev/uinput`. See the [README](https://github.com/TheGeneral4757/arrowhead#install) for first-run setup. The `.sig` file is the in-app updater's signature.
 
 > Automating input in Roblox breaks its Terms of Use. Private servers only, at your own risk.
 

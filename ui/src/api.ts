@@ -37,7 +37,23 @@ export type EngineEvent =
   | { type: "Focus"; focused: boolean | null }
   | { type: "Hotkeys"; bound: string | null; error: string | null }
   | { type: "Log"; level: "info" | "warn" | "error"; text: string }
+  | { type: "Readback"; ms: number; judgment: Judgment; offset_ms: number }
+  | ({ type: "Stats" } & GameStats)
+  | { type: "Song"; title: string; difficulty: string }
+  | ({ type: "Hud" } & HudView)
   | { type: "Stopped"; error: string | null };
+
+/** HUD totals for the song (spec 07, Stats). `counts`: Sick, Good, Ok, Bad, Miss. `null` = not readable yet. */
+export type GameStats = {
+  accuracy: number | null;
+  counts: (number | null)[];
+  mean_err_ms: number | null;
+  ur: number | null;
+  readbacks: number;
+  target: number | null;
+  score_self: number | null;
+  score_opponent: number | null;
+};
 
 export type SourceInfo = {
   width: number;
@@ -62,6 +78,20 @@ export type Status = {
   update: UpdateInfo | null;
 };
 
+type Region = [number, number, number, number];
+/** What the HUD reader found (spec 07, Hud): regions in stream pixels and the last reads. */
+export type HudView = {
+  ocr: "loading" | "ready" | "off";
+  stats: Region | null;
+  counts: Region | null;
+  ms: Region | null;
+  ms_read: number | null;
+  title: Region | null;
+  scores: [Region | null, Region | null];
+  score_values: [number | null, number | null];
+  seat: "left" | "right" | null;
+  matching: string | null;
+};
 export type Config = {
   version: number;
   profile: string;
@@ -71,8 +101,16 @@ export type Config = {
   safety: { dry_run: boolean; require_focus_guard: boolean; max_hold_ms: number; game_window_classes: string[] };
   capture: { linux_source: "monitor" | "window"; windows_backend: "auto" | "dxgi" | "wgc-monitor" | "wgc-window" };
   timing: { commit_ms: number; late_limit_ms: number; tap_hold_ms: number; min_gap_ms: number };
-  game: unknown;
-  ui: { overlay: AutoOnOff; minimise_while_playing: AutoOnOff };
+  game: {
+    windows_ms: { sick: number; good: number; ok: number; bad: number };
+    accuracy_weights: { sick: number; good: number; ok: number; bad: number; miss: number };
+    readback_sign: number;
+    stats_mean_sign: number;
+    seat: "auto" | "left" | "right";
+  };
+  match_friend: { on: boolean; margin_pct: number };
+  debug: { flight_recorder: boolean };
+  ui: { overlay: AutoOnOff; minimise_while_playing: AutoOnOff; hud_reader: boolean; ocr_model: string; overlay_output: string };
   updates: { check: boolean };
   log: { level: string; per_note: boolean };
 };
@@ -106,6 +144,52 @@ export type Permissions = { uinput: Check; hotkeys: Check; screencast: Check; ga
 /** `png` is a data: URL of the full-stream snapshot; the layout is drawn over it by the UI. */
 export type Calibration = { layout: Layout; nudge: Nudge; png: string; colours_learned: boolean; trail_learned: boolean };
 export type LatencyResult = { trials: number; input_ms_p50: number; input_ms_p90: number; includes_capture: boolean };
+/** Player style (spec 06, core::style::Style). Built-ins: Max, Sweaty, Casual friend, Rusty.
+ * `miss_floor` and `miss_k` are fractions, `target` a percentage. */
+export type Style = {
+  name: string;
+  target: number;
+  sigma0: number;
+  bias: number;
+  spread: number;
+  chord: number;
+  jack: number;
+  stream: number;
+  fatigue: number;
+  focus_drift: number;
+  miss_floor: number;
+  miss_k: number;
+  p_slip: number;
+  hold_release_ms: number;
+  release_bias: number;
+  ur_min: number;
+};
+/** `probs`: Sick, Good, Ok, Bad, Miss. */
+export type StylePreview = { k: number; sigma_ms: number; mean_ms: number; probs: number[]; accuracy: number };
+export type Judgment = "sick" | "good" | "ok" | "bad" | "miss";
+/** One line of history.jsonl (spec 08). `hit_hist.counts[i]` covers [from_ms + i * bin_ms, + bin_ms). */
+export type HistoryEntry = {
+  v: number;
+  started: string;
+  duration_s: number;
+  song: string;
+  difficulty: string;
+  profile: string;
+  style: string;
+  target: number | null;
+  accuracy_hud: number | null;
+  counts: Partial<Record<Judgment, number>>;
+  mean_err_ms: number | null;
+  ur: number | null;
+  offset_ms: number;
+  engine_missed: number;
+  watchdog_releases: number;
+  seed: number;
+  hit_hist?: { from_ms: number; bin_ms: number; counts: number[] };
+  /** From the results screen; absent when it was not read. */
+  total_notes?: number;
+  highest_combo?: number;
+};
 export type UpdateInfo = { version: string; notes: string | null; can_install: boolean };
 
 export const api = {
@@ -120,6 +204,8 @@ export const api = {
   stopEngine: () => invoke<void>("stop_engine"),
   setPaused: (paused: boolean) => invoke<void>("set_paused", { paused }),
   panic: () => invoke<void>("panic"),
+  toggleOverlay: () => invoke<boolean>("toggle_overlay"),
+  overlayShown: () => invoke<boolean>("overlay_shown"),
   setDryRun: (dryRun: boolean) => invoke<void>("set_dry_run", { dryRun }),
   getConfig: () => invoke<Config>("get_config"),
   /** Deep-merges `patch` into the config, saves it and returns the result. */
@@ -140,6 +226,14 @@ export const api = {
     listen<boolean>("latency-paint", (e) => f(e.payload)),
   /** Sends one tap of `lane` (0-3) after a 2 s countdown, for the Keys step. */
   testLane: (lane: number) => invoke<void>("test_lane", { lane }),
+  listStyles: () => invoke<Style[]>("list_styles"),
+  selectStyle: (name: string) => invoke<void>("select_style", { name }),
+  /** Saves a user style and makes it active. Built-in names are refused. */
+  saveStyle: (style: Style) => invoke<void>("save_style", { style }),
+  deleteStyle: (name: string) => invoke<void>("delete_style", { name }),
+  stylePreview: (style: Style) => invoke<StylePreview>("style_preview", { style }),
+  /** Newest first. */
+  history: (limit: number, offset: number) => invoke<HistoryEntry[]>("history", { limit, offset }),
   calibrationSnapshot: () => invoke<Calibration>("calibration_snapshot"),
   nudgeLayout: (n: Nudge) => invoke<Calibration>("nudge_layout", n),
   copyDiagnostics: () => invoke<string>("copy_diagnostics"),

@@ -12,7 +12,9 @@ use arrowhead_core::time::Nanos;
 use clap::{Parser, Subcommand};
 
 mod detect;
+mod hud;
 mod latency;
+mod ocr;
 mod run;
 
 #[derive(Parser)]
@@ -83,6 +85,14 @@ enum Cmd {
         /// Also run the tracker and planner and report what would be pressed (no keys)
         #[arg(long)]
         plan: bool,
+        /// Start like a live run: this profile's saved layout and colours (default: the
+        /// config's profile), and with --plan its offset and the config's timing and style
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        profile: Option<String>,
+        /// Percent of frames that repeat the previous frame's pixels (a game frame shown
+        /// twice), to test stale frames
+        #[arg(long, default_value_t = 0.0)]
+        repeat_frames: f32,
     },
     /// Calibrate on the live screen, then play. Dry run (no keys) unless --live
     Run {
@@ -102,6 +112,35 @@ enum Cmd {
         #[arg(long)]
         relearn: bool,
     },
+    /// Run the OCR teacher on screenshots (PNG): lines, rects and timing per variant
+    Ocr {
+        files: Vec<PathBuf>,
+        /// plain | lanczos | threshold | all
+        #[arg(long, default_value = "all")]
+        variant: String,
+        /// Model set name ("default" = bundled ocrs models)
+        #[arg(long, default_value = "default")]
+        model: String,
+    },
+    /// Teach the HUD glyph atlas from known text on screenshots, then find and read the HUD
+    Hud {
+        /// Screenshots (PNG) to read
+        files: Vec<PathBuf>,
+        /// `file.png:kind=values`, see `hud.rs`; file names are looked up next to the first image
+        #[arg(long, allow_hyphen_values = true)]
+        teach: Vec<String>,
+        /// Atlas file to load first (and write with --save)
+        #[arg(long)]
+        atlas: Option<PathBuf>,
+        #[arg(long)]
+        save: bool,
+        #[arg(long, default_value_t = 0.25)]
+        max_sad: f32,
+        /// Our playfield's horizontal span `x0,x1` (stream px): the ms readout is only read
+        /// inside it (the opponent's is ignored). Without it, no ms readout is located
+        #[arg(long, value_parser = parse_span)]
+        playfield: Option<(i32, i32)>,
+    },
     /// Show which window the focus guard thinks is active
     Focus {
         #[arg(long, default_value_t = 10.0)]
@@ -120,6 +159,14 @@ enum Cmd {
     },
 }
 
+fn parse_span(s: &str) -> Result<(i32, i32), String> {
+    let (a, b) = s.split_once(',').ok_or("x0,x1")?;
+    Ok((
+        a.trim().parse().map_err(|e| format!("{e}"))?,
+        b.trim().parse().map_err(|e| format!("{e}"))?,
+    ))
+}
+
 fn parse_rect(s: &str) -> Result<Rect, String> {
     let v: Vec<i64> = s
         .split(',')
@@ -135,6 +182,7 @@ fn parse_rect(s: &str) -> Result<Rect, String> {
 type Res = Result<(), Box<dyn std::error::Error>>;
 
 fn main() -> ExitCode {
+    arrowhead_ocr::limit_threads();
     let res = match Cli::parse().cmd {
         Cmd::Capture { seconds, region } => capture(seconds, region),
         Cmd::Record {
@@ -159,6 +207,8 @@ fn main() -> ExitCode {
             every,
             quiet,
             plan,
+            profile,
+            repeat_frames,
         } => {
             if let Some(d) = &debug_png
                 && let Err(e) = std::fs::create_dir_all(d)
@@ -173,6 +223,8 @@ fn main() -> ExitCode {
                 every,
                 quiet,
                 plan,
+                profile: profile.as_deref(),
+                repeat_frames: repeat_frames / 100.0,
             })
         }
         Cmd::Run {
@@ -193,6 +245,34 @@ fn main() -> ExitCode {
                 },
             )
         }),
+        Cmd::Hud {
+            files,
+            teach,
+            atlas,
+            save,
+            max_sad,
+            playfield,
+        } => {
+            let dir = files
+                .first()
+                .and_then(|f| f.parent())
+                .unwrap_or(Path::new("."))
+                .to_path_buf();
+            hud::run(
+                &files,
+                &teach,
+                &dir,
+                atlas.as_deref(),
+                save,
+                max_sad,
+                playfield,
+            )
+        }
+        Cmd::Ocr {
+            files,
+            variant,
+            model,
+        } => ocr::run(&files, &variant, &model),
         Cmd::Focus { seconds } => run::focus(seconds),
         Cmd::Bench { presses } => run::bench(presses),
         Cmd::Latency { trials } => {
@@ -226,7 +306,24 @@ fn open_screen() -> Result<arrowhead_capture::pipewire::PipewireSource, Box<dyn 
     Ok(PipewireSource::open(&token)?)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+fn open_screen() -> Result<arrowhead_capture::WindowsSource, Box<dyn std::error::Error>> {
+    use arrowhead_core::config::{Config, config_dir, load_toml};
+    let cfg: Config = config_dir()
+        .map(|d| load_toml(&d.join("config.toml")))
+        .transpose()?
+        .unwrap_or_default();
+    eprintln!(
+        "Opening screen capture ({:?})...",
+        cfg.capture.windows_backend
+    );
+    Ok(arrowhead_capture::WindowsSource::open(
+        cfg.capture.windows_backend,
+        cfg.safety.game_window_classes,
+    )?)
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 fn open_screen() -> Result<ReplaySource, Box<dyn std::error::Error>> {
     Err("screen capture on this OS arrives in v0.2".into())
 }
@@ -257,7 +354,7 @@ fn capture(seconds: f32, region: Option<Rect>) -> Res {
         frames += 1;
     }
     let secs = t0.elapsed().as_secs_f64();
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     let stats = src.stats();
     println!(
         "backend      {} ({}), stream {}x{} @ {:.1} Hz",
@@ -286,7 +383,7 @@ fn capture(seconds: f32, region: Option<Rect>) -> Res {
             ""
         }
     );
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     {
         let mut copy: Vec<f64> = stats.copy_ns.iter().map(|&c| c as f64 / 1e3).collect();
         println!(

@@ -245,3 +245,61 @@ fn synthetic_detection_10k_notes() {
         (0, 0, 0, 0)
     );
 }
+
+/// First calibration saw no holds; the trail colour must still come from holds met in play
+/// (the runner feeds every 8th frame to the learner and asks it every 20 feeds).
+#[test]
+fn trail_learned_in_play_after_a_calibration_without_holds() {
+    let mut rng = Rng(91);
+    let s = Scene::random(&mut rng, 1280, 720, Scroll::Up, 1.5);
+    let mut chart = chart(&mut rng, 400, 3000.0);
+    for n in chart.iter_mut().filter(|n| n.t < 20_000.0) {
+        n.hold = 0.0;
+    }
+    assert!(
+        chart.iter().any(|n| n.hold > 0.0),
+        "the chart needs holds after 20 s"
+    );
+    let cfg = DetectConfig::default();
+    let full = Rect::new(0, 0, s.w, s.h);
+    let snaps: Vec<OwnedFrame> = (0..9)
+        .map(|i| s.render(&chart, i as f64 * 250.0, full, None))
+        .collect();
+    let views: Vec<_> = snaps.iter().map(|f| f.view()).collect();
+    let groups = find_groups(&find_blobs(&views, s.h), s.h);
+    let g = &groups[pick_ours(&groups, s.w, Side::Centre).unwrap()];
+    let layout = layout_for(g, &views, s.scroll, [s.w, s.h], &cfg);
+    let region = layout.region(&cfg);
+    let strips: Vec<Rect> = (0..4).map(|l| layout.strip(l, &cfg)).collect();
+    let bg: Vec<OwnedFrame> = (0..21)
+        .map(|i| s.render(&chart, 3000.0 + i as f64 * 800.0, region, Some(&strips)))
+        .collect();
+    let bgv: Vec<_> = bg.iter().map(|f| f.view()).collect();
+    let mut learner = ColourLearner::new(layout.clone(), cfg.clone(), &bgv);
+    let mut fed = 0u32;
+    let mut found_at = None;
+    for (i, (t, _)) in s.frames(&mut rng, 3000.0, 60_000.0).into_iter().enumerate() {
+        if !i.is_multiple_of(8) {
+            continue;
+        }
+        learner.feed(&s.render(&chart, t, region, Some(&strips)).view());
+        fed += 1;
+        if fed.is_multiple_of(20)
+            && let Ok(c) = learner.finish()
+        {
+            if t < 20_000.0 {
+                assert!(
+                    c.trail.is_none(),
+                    "no holds yet at {t} ms, but a trail was learned"
+                );
+            } else if c.trail.is_some() {
+                found_at = Some(t);
+                break;
+            }
+        }
+    }
+    assert!(
+        found_at.is_some(),
+        "trail never learned from the holds in play"
+    );
+}

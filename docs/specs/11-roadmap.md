@@ -38,5 +38,13 @@ Status (2026-11-22): done. v0.1.0 released; manual checklist passed on KDE and H
 ## v0.2.0: Windows, player model, history, overlay
 Tracks: DXGI + WGC capture; SendInput + Windows focus/hotkeys; player model + controller + presets ([06](06-humanizer.md)); HUD reader (glyph atlas, accuracy, scores, readback); Style and History pages; match my friend; overlay process; MSI build.
 
+Status (2026-11-23, branch `v0.2`, draft PR #12): built and reviewed: player model, controller and presets; HUD reader with live teaching and readback; history rows; Style and History pages; Live accuracy panel; overlay process; Windows capture, input, focus, hotkeys and MSI job; HUD side copies from every capture backend. Also built: song titles by OCR with per-song memory; results-panel reading (OCR after the song, row written from its exact numbers); score reading for both sides with seat detection; match my friend on scores (Style page toggle and margin). All three are untested against the live game. Untested until the user runs them: everything against the real game and desktop (readback, teaching, overlay above Sober, Windows as a whole); manual checklist rows 10-11.
+
+Next (2026-11-24): before PR #12 merges, work through [13 Accuracy plan](13-accuracy-plan.md) phases 1-2 (blockers), then 3-6, re-record the test songs, then the Windows checks and checklist rows 10-11.
+
+Status (2026-11-25): accuracy plan phases 1-6 built and checked offline on the 2026-11-24 clips (status per phase in [13](13-accuracy-plan.md)). Next: re-record the six songs with the fixes (overlay on and off, `[debug] flight_recorder = true`), compare with the table in 13, then the Windows checks and checklist rows 10-11.
+
+Status (2026-11-25, later): the user's own live runs on Linux worked as expected. Released as v0.2.0 with Windows (P7, P9-P13) still untested on real hardware (CI builds and tests it); the release notes say so. Manual checklist rows 10-11 were not filled in item by item.
+
 ## v0.3.0 and later (unordered)
 AUR publish automation; libei input fallback; DMA-BUF capture if measurements need it; Hallmark lint hook; landing page.

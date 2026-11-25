@@ -20,10 +20,13 @@ arrowhead/
     overlay/   arrowhead-overlay
     runner/    arrowhead-runner   (the live run shared by app and cli)
     cli/       arrowhead-cli      (binary name: arrowhead-cli)
+    ocr/       arrowhead-ocr      (ocrs OCR wrapper, the HUD reader's teacher; spec 03)
   ui/                     React + TS + Vite front end for the app
   tests/
     clips/                recorded clips (git LFS) + labels
   packaging/aur/          PKGBUILD for arrowhead-bin
+  packaging/fetch-ocr-models.sh   downloads the OCR model sets, SHA-256 pinned (spec 10)
+  THIRD_PARTY_NOTICES.md  OCR model attribution (CC BY-SA 4.0)
   docs/
   .github/workflows/
 ```
@@ -47,7 +50,7 @@ ashpd, pipewire, windows, windows-capture, evdev, ocrs/rten, sctk, tauri were ch
 | tracing, tracing-subscriber, tracing-appender | 0.1 / 0.3 / 0.2 | all | Logs, rotating files |
 | rand, rand_chacha | 0.9 / 0.9 | core | Seeded RNG for the player model (deterministic tests) |
 | zstd | 0.13 | capture | Clip compression |
-| ocrs, rten | 0.14 / 0.28 | core (feature `ocr`) | Song titles, glyph atlas bootstrap. Off hot path |
+| ocrs, rten, rten-tensor, rten-imageproc | 0.14 / 0.28 | ocr (`arrowhead-ocr`) | OCR teacher for the HUD reader (v0.2, [03](03-detection.md#ocr-teacher-v02)). Runs `.onnx` models directly; off the hot path. `ocrs` default features (onnx) are used |
 | dirs | 6 | core | Config/data dirs |
 | smithay-client-toolkit, wayland-protocols-wlr | 0.21 / 0.3 | overlay | Layer-shell |
 | tiny-skia | 0.11 | overlay | Software drawing |
@@ -69,7 +72,6 @@ Not used: xcap, scap, rdev, opencv, tesseract, AVX2 intrinsics (strips are small
 ## Features
 | Crate | Feature | Effect |
 |---|---|---|
-| core | `ocr` | Pulls ocrs/rten. On in app and cli, off in unit tests |
 | capture | `pipewire` (default on Linux), `dxgi`, `wgc` (default on Windows) | Backend selection |
 
 Use `cfg(target_os)` for OS selection, features only for optional heavy deps.

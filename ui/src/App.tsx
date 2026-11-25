@@ -1,40 +1,15 @@
 import { useEffect, useState } from "react";
 import { api, type AppInfo, type Status } from "./api";
 import { engine, useEngine } from "./engine";
+import History from "./pages/History";
 import Live from "./pages/Live";
 import Settings from "./pages/Settings";
 import Setup from "./pages/Setup";
+import Style from "./pages/Style";
 
 const PAGES = ["Live", "Style", "Setup", "History", "Settings"] as const;
 
 const STATE_PILL: Record<string, string> = { Playing: "live", Armed: "armed", Searching: "cool", Paused: "armed" };
-
-function Style() {
-  return (
-    <section className="screen" aria-labelledby="h-style">
-      <div className="screen-head">
-        <div>
-          <h2 id="h-style">Style</h2>
-          <p>v0.1 plays the Max preset: every press aimed at the centre of the window. Presets, a target accuracy and the player model arrive in v0.2.</p>
-        </div>
-        <span className="pill armed">Max</span>
-      </div>
-    </section>
-  );
-}
-
-function History() {
-  return (
-    <section className="screen" aria-labelledby="h-history">
-      <div className="screen-head">
-        <div>
-          <h2 id="h-history">History</h2>
-          <p>One row per song, with accuracy and judgments read from the game. It needs the HUD reader, which arrives in v0.2.</p>
-        </div>
-      </div>
-    </section>
-  );
-}
 
 export default function App() {
   const [page, setPage] = useState(0);

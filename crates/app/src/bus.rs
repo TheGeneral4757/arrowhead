@@ -13,6 +13,8 @@ use arrowhead_core::event::{EngineEvent, Level};
 use arrowhead_core::session::State;
 use tauri::ipc::Channel;
 
+use crate::overlay::Overlay;
+
 /// What the top bar shows, kept current by the bus.
 #[derive(Clone, Debug)]
 pub struct Live {
@@ -138,12 +140,14 @@ pub fn parse_level(s: &str) -> Level {
     }
 }
 
-/// Runs until every sender of `rx` is gone. `ui` is None for setup steps (log only).
+/// Runs until every sender of `rx` is gone. `ui` is None for setup steps (log only). `overlay`
+/// gets the events the overlay process draws and is dropped (killing it) when the bus ends.
 pub fn run(
     rx: Receiver<EngineEvent>,
     ui: Option<Channel<Vec<EngineEvent>>>,
     live: Arc<Mutex<Live>>,
     logs: Arc<LogFile>,
+    mut overlay: Option<Overlay>,
 ) {
     let tick = Duration::from_millis(16);
     let mut next = Instant::now() + tick;
@@ -164,6 +168,9 @@ pub fn run(
                     EngineEvent::Stopped { error: Some(e) } => logs.write(Level::Error, e),
                     _ => {}
                 }
+                if let Some(o) = &mut overlay {
+                    o.push(&e);
+                }
                 if matches!(e, EngineEvent::Notes { .. }) {
                     notes = Some(e);
                 } else if pending.len() < 4096 {
@@ -183,6 +190,9 @@ pub fn run(
                 Vec::new()
             };
             batch.extend(notes.take());
+            if let Some(o) = &mut overlay {
+                o.flush();
+            }
             if let Some(ch) = &ui
                 && !batch.is_empty()
             {

@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
-import type { Pipeline } from "../api";
-import { engine, frame, useEngine } from "../engine";
+import { useEffect, useRef, useState } from "react";
+import { api, type Config, type HudView, type Pipeline } from "../api";
+import { engine, frame, useEngine, type Hit } from "../engine";
 
 const css = (v: string) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
@@ -137,6 +137,37 @@ function Spark({ values }: { values: number[] }) {
   );
 }
 
+const JUDGE = ["sick", "good", "ok", "bad", "miss"] as const;
+const WINDOW_KEYS = ["bad", "ok", "good", "sick"] as const;
+
+/** Last 40 hit errors over the judgment windows; the triangle is the mean. */
+function HitBar({ hits, windows }: { hits: Hit[]; windows: Config["game"]["windows_ms"] }) {
+  const W = 300;
+  const H = 40;
+  const R = windows.bad + 20;
+  const x = (ms: number) => ((Math.max(-R, Math.min(R, ms)) + R) / (2 * R)) * W;
+  const mean = hits.length ? hits.reduce((a, h) => a + h.ms, 0) / hits.length : null;
+  return (
+    <div className="curve hitbar">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="Last hit errors against the judgment windows">
+        {WINDOW_KEYS.map((k) => (
+          <rect key={k} x={x(-windows[k])} y={H * 0.3} width={x(windows[k]) - x(-windows[k])} height={H * 0.4} className={`band band-${k}`} />
+        ))}
+        <line x1={x(0)} x2={x(0)} y1={0} y2={H} className="zero" />
+        {hits.map((h, i) => (
+          <rect key={i} x={x(h.ms) - 1} y={H * 0.15} width={2} height={H * 0.7} className={`tick judge-${h.judgment}`} style={{ opacity: 0.25 + (0.75 * (i + 1)) / hits.length }} />
+        ))}
+        {mean !== null && <polygon points={`${x(mean) - 5},0 ${x(mean) + 5},0 ${x(mean)},7`} className="mean" />}
+      </svg>
+      <div className="hit-scale mono xs muted">
+        <span>early</span>
+        <span>{mean !== null ? `mean ${mean >= 0 ? "+" : ""}${mean.toFixed(1)} ms` : "0"}</span>
+        <span>late</span>
+      </div>
+    </div>
+  );
+}
+
 const METRICS: { k: string; f: (p: Pipeline) => number; fmt: (v: number) => string }[] = [
   { k: "Capture", f: (p) => p.fps, fmt: (v) => `${v.toFixed(0)} fps` },
   { k: "Frame interval p50 / p99", f: (p) => p.interval_p99_ms, fmt: (v) => `${v.toFixed(1)} ms` },
@@ -149,6 +180,15 @@ const METRICS: { k: string; f: (p: Pipeline) => number; fmt: (v: number) => stri
 export default function Live({ active }: { active: boolean }) {
   const s = useEngine();
   const last = s.pipeline.at(-1);
+  const [cfg, setCfg] = useState<Config | null>(null);
+  useEffect(() => {
+    api.getConfig().then(setCfg, () => {});
+  }, [s.running]);
+  const [overlayOn, setOverlayOn] = useState<boolean | null>(null);
+  useEffect(() => {
+    api.overlayShown().then(setOverlayOn, () => {});
+  }, [s.running]);
+  const st = s.stats;
   const busy = s.running;
   const scroll = s.layout ? (s.layout.scroll === "up" ? "upscroll" : "downscroll") : null;
 
@@ -156,18 +196,17 @@ export default function Live({ active }: { active: boolean }) {
     <section className="screen" aria-labelledby="h-live">
       <div className="screen-head">
         <div>
-          <h2 id="h-live">Live</h2>
+          <h2 id="h-live">{s.song ? `${s.song.title}${s.song.difficulty ? `, ${s.song.difficulty}` : ""}` : "Live"}</h2>
           <p>
             {scroll
               ? `Centre side, ${scroll}, scroll speed ${last && last.speed_px_ms > 0 ? `${last.speed_px_ms.toFixed(2)} px/ms` : "not fitted yet"}.`
               : busy
                 ? "Calibrating. Keep a song playing and the game visible."
                 : "Start a song in the game, then press Start."}{" "}
-            Song titles arrive with the HUD reader in v0.2.
           </p>
         </div>
         <div className="live-controls">
-          <span className="pill armed">Preset: Max</span>
+          <span className="pill armed">Preset: {cfg?.style ?? "Max"}</span>
           <button className="btn" aria-pressed={s.dryRun} onClick={() => engine.setDryRun(!s.dryRun)}>
             Dry run {s.dryRun ? "on" : "off"}
           </button>
@@ -199,10 +238,45 @@ export default function Live({ active }: { active: boolean }) {
               <h3>Accuracy and judgments</h3>
             </div>
             <div className="panel-body">
-              <p className="small muted">
-                Accuracy, the five judgment counts and the hit error bar are read from the game's HUD. That reader arrives in
-                v0.2, so nothing is shown here yet.
-              </p>
+              {st ? (
+                <>
+                  <div className="acc-row">
+                    <span className="acc measured num">{st.accuracy !== null ? `${st.accuracy.toFixed(2)}%` : "-"}</span>
+                    {st.target !== null && <span className="note">target <span className="num accent">{st.target.toFixed(1)}%</span></span>}
+                  </div>
+                  {(st.score_self !== null || st.score_opponent !== null) && (
+                    <p className="note">
+                      score <span className="num measured">{st.score_self ?? "-"}</span> vs opponent <span className="num">{st.score_opponent ?? "-"}</span>
+                    </p>
+                  )}
+                  <div className="judges">
+                    {JUDGE.map((k, i) => (
+                      <div key={k} className="judge">
+                        <span className={`sw judge-${k}`} />
+                        <span className="xs muted">{k[0].toUpperCase() + k.slice(1)}</span>
+                        <span className="num measured">{st.counts[i] ?? "-"}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {cfg && s.hits.length > 0 ? (
+                    <HitBar hits={s.hits} windows={cfg.game.windows_ms} />
+                  ) : (
+                    <p className="note">Hit errors show once the game's ms readout under our notes is learned, from the first hit of a song.</p>
+                  )}
+                  {st.ur !== null && (
+                    <p className="note">
+                      UR <span className="num measured">{st.ur.toFixed(0)}</span> over {st.readbacks} hits
+                      {s.offset !== null ? `, offset now ${s.offset >= 0 ? "+" : ""}${s.offset.toFixed(1)} ms` : ""}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p className="small muted">
+                  {busy
+                    ? "Reading the game's HUD. Accuracy and the judgment counts show once a song starts and the stats panel is found."
+                    : "Accuracy, the five judgment counts and the hit error bar are read from the game's HUD while a song plays."}
+                </p>
+              )}
             </div>
           </div>
           <div className="panel">
@@ -250,6 +324,17 @@ export default function Live({ active }: { active: boolean }) {
           </div>
           <div className="panel">
             <div className="panel-head">
+              <h3>What it sees</h3>
+              <button className="btn" onClick={() => api.toggleOverlay().then(setOverlayOn, () => {})}>
+                {overlayOn ? "Hide overlay" : "Show overlay"}
+              </button>
+            </div>
+            <div className="panel-body">
+              {s.hud ? <Sees v={s.hud} /> : <p className="small muted">What the HUD reader has found, and its last reads, show here while the engine runs.</p>}
+            </div>
+          </div>
+          <div className="panel">
+            <div className="panel-head">
               <h3>Log</h3>
               <span className="note">
                 {s.hotkeys?.bound ? `hotkeys: ${s.hotkeys.bound}` : s.hotkeys?.error ? `hotkeys off: ${s.hotkeys.error}` : ""}
@@ -267,5 +352,38 @@ export default function Live({ active }: { active: boolean }) {
         </div>
       </div>
     </section>
+  );
+}
+
+/** The HUD reader's view: each region found or still searched for, with its last read. */
+function Sees({ v }: { v: HudView }) {
+  const at = (r: HudView["stats"]) => (r ? `at ${r[0]},${r[1]}` : "searching");
+  const side = (i: 0 | 1) => (v.seat === null ? (i === 0 ? "Left score" : "Right score") : (i === 0) === (v.seat === "left") ? "Your score" : "Opponent score");
+  const rows: [string, HudView["stats"], string][] = [
+    ["Stats panel", v.stats, ""],
+    ["Counts", v.counts, ""],
+    ["Your ms readout", v.ms, v.ms_read !== null ? `${v.ms_read.toFixed(2)} ms` : ""],
+    ["Song title", v.title, ""],
+    [side(0), v.scores[0], v.score_values[0] !== null ? String(v.score_values[0]) : ""],
+    [side(1), v.scores[1], v.score_values[1] !== null ? String(v.score_values[1]) : ""],
+  ];
+  return (
+    <>
+      <table className="counts">
+        <tbody>
+          {rows.map(([name, r, read]) => (
+            <tr key={name}>
+              <td>{name}</td>
+              <td className={r ? "num" : "muted"}>{at(r)}</td>
+              <td className="num measured">{read}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="small muted">
+        OCR {v.ocr}; your side {v.seat ?? "not known yet"}
+        {v.matching && <>; match my friend: {v.matching}</>}
+      </p>
+    </>
   );
 }

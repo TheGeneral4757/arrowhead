@@ -1,16 +1,21 @@
 //! Engine: frame types, detection, tracking, timing, scheduler, player model,
 //! session state and config. OS-free except `runtime::platform`.
 
+pub mod adapt;
 pub mod config;
 pub mod detect;
 pub mod engine;
 pub mod event;
 pub mod frame;
+pub mod hud;
 pub mod input;
 pub mod plan;
+pub mod rival;
 pub mod runtime;
 pub mod sched;
 pub mod session;
+pub mod style;
+
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
 pub mod time;

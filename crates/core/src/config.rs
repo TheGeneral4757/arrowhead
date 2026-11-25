@@ -36,6 +36,8 @@ pub struct Config {
     pub ui: Ui,
     pub updates: Updates,
     pub log: Log,
+    pub match_friend: MatchFriend,
+    pub debug: Debug,
 }
 
 impl Default for Config {
@@ -53,6 +55,8 @@ impl Default for Config {
             ui: Ui::default(),
             updates: Updates::default(),
             log: Log::default(),
+            debug: Debug::default(),
+            match_friend: MatchFriend::default(),
         }
     }
 }
@@ -196,6 +200,10 @@ pub struct Game {
     pub windows_ms: Windows,
     pub accuracy_weights: AccuracyWeights,
     pub readback_sign: i8,
+    /// The stats panel's Mean MS against the ms popup: -1 = opposite sign (confirmed, G14).
+    pub stats_mean_sign: i8,
+    /// Which side of the stage we play on: our score, stats and counts are on that side.
+    pub seat: Seat,
 }
 
 impl Default for Game {
@@ -215,6 +223,8 @@ impl Default for Game {
                 miss: 0.0,
             },
             readback_sign: -1,
+            stats_mean_sign: -1,
+            seat: Seat::Auto,
         }
     }
 }
@@ -228,11 +238,29 @@ pub enum AutoOnOff {
     Off,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Ui {
     pub overlay: AutoOnOff,
     pub minimise_while_playing: AutoOnOff,
+    /// Read the game's HUD (readback, accuracy, counts). Off: plays on the saved offset only.
+    pub hud_reader: bool,
+    /// OCR model set ("default" = the bundled ocrs models; others live in `models/<name>/`).
+    pub ocr_model: String,
+    /// Output the overlay goes on (e.g. "DP-2"); empty: the one matching the capture.
+    pub overlay_output: String,
+}
+
+impl Default for Ui {
+    fn default() -> Self {
+        Self {
+            overlay: AutoOnOff::default(),
+            minimise_while_playing: AutoOnOff::default(),
+            hud_reader: true,
+            ocr_model: "default".into(),
+            overlay_output: String::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -245,6 +273,15 @@ impl Default for Updates {
     fn default() -> Self {
         Self { check: true }
     }
+}
+
+/// Developer aids, off by default.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Debug {
+    /// Keep the last 10 s of playfield frames and presses; dump them when the Misses counter
+    /// rises (`<data>/flight/`, spec 13 3.2).
+    pub flight_recorder: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -261,6 +298,25 @@ impl Default for Log {
             per_note: false,
         }
     }
+}
+
+/// Our side of the stage (spec 03): `auto` takes the side the stats panel is on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Seat {
+    #[default]
+    Auto,
+    Left,
+    Right,
+}
+
+/// Match my friend (spec 06): the target follows the opponent's score.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MatchFriend {
+    pub on: bool,
+    /// Where to land against their score, percent of it (-3 to +3).
+    pub margin_pct: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -325,6 +381,16 @@ pub struct HudRegions {
     pub score_opponent: Option<[i32; 4]>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<[i32; 4]>,
+    /// Stats panel (7 rows, Accuracy first) and judgment counts (5 rows).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stats: Option<[i32; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub counts: Option<[i32; 4]>,
+    /// Scores by screen side; the engine maps them to self/opponent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score_left: Option<[i32; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score_right: Option<[i32; 4]>,
 }
 
 /// Calibration for one display setup. `[colours]` and `[detect]` arrive in M3;
@@ -403,6 +469,22 @@ pub struct HistoryEntry {
     pub engine_missed: u32,
     pub watchdog_releases: u32,
     pub seed: u64,
+    /// Hit-error histogram for the History page; absent on rows without hit errors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hit_hist: Option<HitHist>,
+    /// From the results screen; absent when it was not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_notes: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub highest_combo: Option<u32>,
+}
+
+/// `counts[i]` holds hit errors in `[from_ms + i * bin_ms, from_ms + (i + 1) * bin_ms)`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct HitHist {
+    pub from_ms: f32,
+    pub bin_ms: f32,
+    pub counts: Vec<u32>,
 }
 
 #[derive(Debug)]
@@ -509,6 +591,22 @@ pub fn append_history(path: &Path, entry: &HistoryEntry) -> io::Result<()> {
     f.sync_data()
 }
 
+/// Newest first, skipping `offset` rows. Unreadable lines (hand edits, older versions) are skipped.
+pub fn read_history(path: &Path, limit: usize, offset: usize) -> io::Result<Vec<HistoryEntry>> {
+    let text = match fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    Ok(text
+        .lines()
+        .rev()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .skip(offset)
+        .take(limit)
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -578,12 +676,47 @@ mod tests {
             engine_missed: 0,
             watchdog_releases: 0,
             seed: 1,
+            hit_hist: None,
+            total_notes: None,
+            highest_combo: None,
         };
         append_history(&p, &e).unwrap();
-        append_history(&p, &e).unwrap();
+        let e2 = HistoryEntry {
+            seed: 2,
+            hit_hist: Some(HitHist {
+                from_ms: -230.0,
+                bin_ms: 10.0,
+                counts: vec![0, 3, 1],
+            }),
+            total_notes: Some(727),
+            highest_combo: Some(69),
+            ..e.clone()
+        };
+        // rows written before the results fields still parse
+        let old = serde_json::to_string(&e).unwrap();
+        assert!(!old.contains("total_notes"));
+        assert_eq!(serde_json::from_str::<HistoryEntry>(&old).unwrap(), e);
+        append_history(&p, &e2).unwrap();
         let text = fs::read_to_string(&p).unwrap();
         let lines: Vec<_> = text.lines().collect();
         assert_eq!(lines.len(), 2);
-        assert_eq!(serde_json::from_str::<HistoryEntry>(lines[1]).unwrap(), e);
+        assert_eq!(serde_json::from_str::<HistoryEntry>(lines[1]).unwrap(), e2);
+
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&p)
+            .unwrap()
+            .write_all(b"not json\n")
+            .unwrap();
+        assert_eq!(
+            read_history(&p, 10, 0).unwrap(),
+            vec![e2.clone(), e.clone()]
+        );
+        assert_eq!(read_history(&p, 1, 1).unwrap(), vec![e]);
+        assert!(
+            read_history(&dir.path().join("none.jsonl"), 10, 0)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

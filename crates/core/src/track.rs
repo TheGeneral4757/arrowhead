@@ -342,7 +342,15 @@ impl Tracker {
         // Observations inside the receptor zone are left out: glow and splashes sit there.
         let (ry, a, r) = (self.ry, self.approach, self.radius);
         let outside = |lane: u8, y: f32| (y - ry[lane as usize]) * a > r;
-        for tr in self.tracks.iter().filter(|tr| tr.confirmed) {
+        // The first speed comes from heads only: a grey trail end can be HUD text fading in or
+        // out (the countdown's key labels under the receptors), which crept at 0.15 px/ms and
+        // set a speed that real notes then never matched (spec 13, 6.2).
+        let tails = self.v.is_some();
+        for tr in self
+            .tracks
+            .iter()
+            .filter(|tr| tr.confirmed && (tails || !tr.tail))
+        {
             let h = tr.hist();
             for (i, a) in h.iter().enumerate() {
                 for b in &h[i + 1..] {
@@ -386,5 +394,62 @@ impl Tracker {
             k += 1;
         }
         if k < 3 { 0.0 } else { median(&mut res[..k]) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Scroll;
+
+    #[test]
+    fn countdown_text_does_not_set_the_speed() {
+        // Upscroll, receptors at y 200. During the countdown grey key labels below the
+        // receptors move with the stage's zoom-in, then fade (read as trail ends); then notes
+        // come up at 2 px/ms. The speed must come from the notes.
+        let layout = Layout {
+            receptors: [
+                [100.0, 200.0],
+                [200.0, 200.0],
+                [300.0, 200.0],
+                [400.0, 200.0],
+            ],
+            size: 140.0,
+            run_len: [130.0; 4],
+            run_shape: [[-65.0, 0.0, 65.0]; 4],
+            scroll: Scroll::Up,
+            stream: [1000, 1440],
+        };
+        let mut tr = Tracker::new(&layout, [130.0; 4]);
+        let obs = |lane: u8, y: f32, kind| NoteObs {
+            lane,
+            y,
+            kind,
+            pts: Nanos(0),
+        };
+        let mut t: f64 = 0.0;
+        while t < 1500.0 {
+            let o: Vec<NoteObs> = (0..4)
+                // the stage zooms in (0.5 px/ms for 150 ms), then the labels fade and creep
+                .map(|l| {
+                    let y = 430.0 - 0.5 * t.min(150.0) as f32 - 0.02 * (t - 150.0).max(0.0) as f32;
+                    obs(l, y, ObsKind::TrailEnd)
+                })
+                .collect();
+            tr.update(Nanos::from_ms(t), &o);
+            t += 6.0;
+        }
+        assert_eq!(tr.velocity(), None, "labels gave a speed");
+        let start = t;
+        while t < start + 600.0 {
+            let y = 1300.0 - 2.0 * (t - start) as f32;
+            tr.update(
+                Nanos::from_ms(t),
+                &[obs(0, y, ObsKind::Head), obs(2, y + 300.0, ObsKind::Head)],
+            );
+            t += 6.0;
+        }
+        let v = tr.velocity().expect("notes give a speed");
+        assert!((v + 2.0).abs() < 0.05, "{v}");
     }
 }

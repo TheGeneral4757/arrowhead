@@ -51,6 +51,8 @@ pub struct DetectConfig {
     /// Min `|C1| + |C2|` for the "saturated" half of the learning rule.
     pub learn_chroma: i32,
     pub receptor_ncc_min: f32,
+    /// HUD glyph match: mean absolute difference (0..1) above which a read is rejected.
+    pub glyph_max_sad: f32,
 }
 
 impl Default for DetectConfig {
@@ -67,6 +69,7 @@ impl Default for DetectConfig {
             bg_tol: 18,
             learn_chroma: 40,
             receptor_ncc_min: 0.6,
+            glyph_max_sad: 0.25,
         }
     }
 }
@@ -266,6 +269,15 @@ impl Detector {
             *b = l as u16 * 16;
         }
         self.primed = true;
+    }
+
+    /// The background as adapted so far, in `set_background`'s form.
+    pub fn background(&self, lane: usize) -> Vec<u8> {
+        self.lanes[lane]
+            .bg
+            .iter()
+            .map(|&b| (b / 16) as u8)
+            .collect()
     }
 
     pub fn strip(&self, lane: usize) -> Rect {

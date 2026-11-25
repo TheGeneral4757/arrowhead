@@ -21,6 +21,7 @@ Specs turn the [vision](../vision/VISION.md) and [decisions](../vision/decisions
 | 10 | [Release and updates](10-release.md) | M5 |
 | 11 | [Roadmap](11-roadmap.md) | - |
 | 12 | [Open questions (game facts to verify)](12-open-questions.md) | M0 |
+| 13 | [Accuracy plan (v0.2 fixes from recorded runs)](13-accuracy-plan.md) | v0.2 |
 
 ## Words
 

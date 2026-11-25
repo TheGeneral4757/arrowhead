@@ -162,6 +162,26 @@ export default function Settings({ update }: { update: UpdateInfo | null }) {
             <h3>App</h3>
           </div>
           <div className="panel-body set-list">
+            <Row title="Read the game's HUD" note="Accuracy, judgment counts and ms readouts, which tune the offset as you play. Turn off to compare scanning fps. Applies from the next start.">
+              <Switch label="Read the game's HUD" checked={cfg.ui.hud_reader} onChange={(v) => save({ ui: { hud_reader: v } })} />
+            </Row>
+            <Row title="Your side" note="Which score is yours. Auto: the side the stats panel is on. Applies from the next start.">
+              <select aria-label="Your side" value={cfg.game.seat} onChange={(e) => save({ game: { seat: e.target.value as Config["game"]["seat"] } })}>
+                <option value="auto">Auto</option>
+                <option value="left">Left</option>
+                <option value="right">Right</option>
+              </select>
+            </Row>
+            <Row title="Overlay monitor" note="Output name (e.g. DP-2) the overlay goes on. Empty: the one that matches the capture's size and refresh rate. Applies from the next start.">
+              <Field label="Overlay monitor" mono value={cfg.ui.overlay_output} onSave={(v) => save({ ui: { overlay_output: v.trim() } })} />
+            </Row>
+            <Row title="Overlay over the game" note="Click-through state, judgment and hit errors, kept clear of the lanes and HUD. Auto shows it only on a single-monitor setup. Applies at once; the run goes on.">
+              <select aria-label="Overlay" value={cfg.ui.overlay} onChange={(e) => save({ ui: { overlay: e.target.value as Config["ui"]["overlay"] } })}>
+                <option value="auto">Auto</option>
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </Row>
             <Row title="Log level" note="Daily files in the data folder, kept for 7 days.">
               <select aria-label="Log level" value={cfg.log.level} onChange={(e) => save({ log: { level: e.target.value } })}>
                 <option value="info">info</option>

@@ -171,6 +171,28 @@ impl Ring {
     }
 }
 
+/// One full-size frame from a running ring (calibration, not the hot path); restores the region.
+pub fn snapshot(
+    ring: &Ring,
+    info: &arrowhead_core::frame::SourceInfo,
+) -> Result<arrowhead_core::frame::OwnedFrame, CaptureError> {
+    let prev = ring.region();
+    ring.set_region(Rect::default());
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let out = loop {
+        match ring.acquire(deadline.saturating_duration_since(std::time::Instant::now())) {
+            Ok(Some(s)) if s.region.w == info.width && s.region.h == info.height => {
+                break Ok(s.view().to_owned());
+            }
+            Ok(Some(_)) => continue,
+            Ok(None) => break Err(CaptureError::Backend("no full frame within 1 s".into())),
+            Err(e) => break Err(e),
+        }
+    };
+    ring.set_region(prev);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
