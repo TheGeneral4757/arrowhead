@@ -12,6 +12,10 @@ pub struct Engine {
     pub tracker: Tracker,
     pub planner: Planner,
     obs: Vec<NoteObs>,
+    /// The last frame's observations, to spot a repeated frame.
+    prev: Vec<NoteObs>,
+    /// Frames skipped by the tracker as repeats.
+    pub repeats: u64,
     last_now: Option<Nanos>,
     /// Smoothed frame interval, ms.
     pub frame_ms: f64,
@@ -25,6 +29,8 @@ impl Engine {
             tracker,
             planner: Planner::new(plan),
             obs: Vec::with_capacity(64),
+            prev: Vec::with_capacity(64),
+            repeats: 0,
             last_now: None,
             frame_ms: 16.7,
         }
@@ -32,8 +38,15 @@ impl Engine {
 
     /// `now` is when the frame reached us; commands are appended to `out`.
     pub fn on_frame(&mut self, f: &FrameView, now: Nanos, out: &mut Vec<Cmd>) {
+        std::mem::swap(&mut self.obs, &mut self.prev);
         self.det.detect(f, &mut self.obs);
-        self.tracker.update(f.pts, &self.obs);
+        // A game frame shown twice: every head and trail end exactly where it was. Its new pts
+        // would tell the tracker the notes stopped (spec 13, 4.2), so it only plans.
+        if repeated(&self.prev, &self.obs) {
+            self.repeats += 1;
+        } else {
+            self.tracker.update(f.pts, &self.obs);
+        }
         if let Some(prev) = self.last_now.replace(now) {
             let dt = now.ms_since(prev).clamp(1.0, 50.0);
             self.frame_ms += 0.1 * (dt - self.frame_ms);
@@ -44,6 +57,20 @@ impl Engine {
     pub fn obs(&self) -> &[NoteObs] {
         &self.obs
     }
+}
+
+/// Same observations as the last frame, to the sub-pixel, with something that moves (a head or
+/// a trail end; trail starts and cuts sit still at the strip's edges during a hold).
+fn repeated(prev: &[NoteObs], now: &[NoteObs]) -> bool {
+    use crate::detect::ObsKind;
+    now.len() == prev.len()
+        && now
+            .iter()
+            .any(|o| matches!(o.kind, ObsKind::Head | ObsKind::TrailEnd))
+        && now
+            .iter()
+            .zip(prev)
+            .all(|(a, b)| a.lane == b.lane && a.kind == b.kind && a.y == b.y)
 }
 
 #[cfg(test)]
@@ -107,9 +134,19 @@ mod tests {
         notes: usize,
         style: Option<StylePlayer>,
     ) -> Score {
-        suite_full(seed, fps, speed, scroll, notes, style, ([0.0; 4], [0.0; 3]))
+        suite_full(
+            seed,
+            fps,
+            speed,
+            scroll,
+            notes,
+            style,
+            ([0.0; 4], [0.0; 3]),
+            0.0,
+        )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn suite_full(
         seed: u64,
         fps: f64,
@@ -118,10 +155,12 @@ mod tests {
         notes: usize,
         style: Option<StylePlayer>,
         corr: ([f64; 4], [f64; 3]),
+        repeat: f64,
     ) -> Score {
         let mut rng = Rng(seed);
         let mut s = Scene::random(&mut rng, 1280, 720, scroll, speed);
         s.fps = fps;
+        s.repeat = repeat;
         let chart = chart(&mut rng, notes, 3000.0);
         let cal = calibrate(&s, &chart, &mut rng);
         let region = cal.layout.region(&cal.det.cfg);
@@ -144,11 +183,16 @@ mod tests {
             }
             clock.set(upto);
         };
+        let mut shown = 0.0;
         for (t, pts) in s.frames(&mut rng, 0.0, end) {
+            // A repeated frame shows the last one's picture with its own pts.
+            if repeat == 0.0 || rng.f64() >= repeat {
+                shown = t;
+            }
             // The frame reaches us 3 ms after it was shown.
             let now = pts_of(t + 3.0);
             drain(&mut sched, &mut sink, now);
-            let mut f = s.render(&chart, t, region, Some(&strips));
+            let mut f = s.render(&chart, shown, region, Some(&strips));
             f.pts = pts;
             cmds.clear();
             eng.on_frame(&f.view(), now, &mut cmds);
@@ -227,13 +271,56 @@ mod tests {
     #[test]
     fn lane_and_class_corrections_shift_presses() {
         let base = suite(70, 144.0, 2.0, Scroll::Up, 60);
-        let lane = suite_full(70, 144.0, 2.0, Scroll::Up, 60, None, ([-4.0; 4], [0.0; 3]));
-        let class = suite_full(70, 144.0, 2.0, Scroll::Up, 60, None, ([0.0; 4], [-4.0; 3]));
+        let lane = suite_full(
+            70,
+            144.0,
+            2.0,
+            Scroll::Up,
+            60,
+            None,
+            ([-4.0; 4], [0.0; 3]),
+            0.0,
+        );
+        let class = suite_full(
+            70,
+            144.0,
+            2.0,
+            Scroll::Up,
+            60,
+            None,
+            ([0.0; 4], [-4.0; 3]),
+            0.0,
+        );
         assert_eq!(lane.short_presses, 0, "{lane:?}");
         assert_eq!(lane.unpressed, base.unpressed, "{lane:?}");
         for sc in [&lane, &class] {
             let d = sc.worst_press_ms - base.worst_press_ms;
             assert!((-6.5..=-1.5).contains(&d), "shift {d}: {sc:?} vs {base:?}");
+        }
+    }
+
+    #[test]
+    fn repeated_frames_keep_timing() {
+        // 15% of frames show the previous picture again (spec 13, 4.2).
+        for (seed, fps) in [(80, 144.0), (81, 165.0), (82, 60.0)] {
+            let sc = suite_full(
+                seed,
+                fps,
+                2.0,
+                Scroll::Up,
+                150,
+                None,
+                ([0.0; 4], [0.0; 3]),
+                0.15,
+            );
+            eprintln!("{fps} Hz, 15% repeats: {sc:?}");
+            let tol = if fps < 100.0 { 2.5 } else { 2.0 };
+            assert!(
+                sc.unpressed + sc.extra == 0
+                    && sc.worst_press_ms.abs() <= tol
+                    && sc.worst_release_ms.abs() <= 5.0,
+                "{fps} Hz: {sc:?}"
+            );
         }
     }
 

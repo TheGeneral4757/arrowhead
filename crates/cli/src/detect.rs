@@ -6,6 +6,7 @@
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Instant;
 
 use arrowhead_capture::clip::{ClipHeader, ClipReader};
@@ -16,8 +17,11 @@ use arrowhead_core::detect::calib::{
 use arrowhead_core::detect::{Colours, DetectConfig, Detector, Layout, NoteObs, ObsKind};
 use arrowhead_core::engine::Engine;
 use arrowhead_core::frame::{FrameView, OwnedFrame};
+use arrowhead_core::input::{KeyAction, RecordingSink};
 use arrowhead_core::plan::{Cmd, PlanConfig};
+use arrowhead_core::sched::Scheduler;
 use arrowhead_core::style::StylePlayer;
+use arrowhead_core::time::{Clock, VirtualClock};
 
 use crate::{Res, pct};
 
@@ -31,6 +35,8 @@ pub struct Opts<'a> {
     pub plan: bool,
     /// Start from this profile's layout and colours, like a live run ("" = the config's).
     pub profile: Option<&'a str>,
+    /// Fraction of frames (0-1) that repeat the previous frame's pixels with a new pts.
+    pub repeat_frames: f32,
 }
 
 fn spread(reader: &mut ClipReader, n: usize, upto: usize) -> std::io::Result<Vec<OwnedFrame>> {
@@ -108,7 +114,13 @@ pub fn run(o: Opts) -> Res {
     });
 
     let (mut cmds, mut presses, mut holds) = (Vec::new(), [0u32; 4], 0u32);
-    let mut buf = Vec::new();
+    // The real scheduler on a virtual clock: what the keys would have done.
+    let clock = Arc::new(VirtualClock::default());
+    let mut sink = RecordingSink::new(clock.clone());
+    let mut sched = Scheduler::new(PlanConfig::default().max_hold_ms);
+    let mut sev = Vec::new();
+    let mut fired = 0usize;
+    let (mut buf, mut scratch, mut rng) = (Vec::new(), Vec::new(), 1u64);
     let mut obs: Vec<NoteObs> = Vec::with_capacity(64);
     let mut prev: Vec<NoteObs> = Vec::with_capacity(64);
     let mut times = Vec::with_capacity(n);
@@ -116,7 +128,15 @@ pub fn run(o: Opts) -> Res {
     let out = std::io::stdout();
     let mut out = BufWriter::new(out.lock());
     for i in 0..n {
-        let (pts, seq) = reader.read_into(i, &mut buf)?;
+        let (pts, seq) = reader.read_into(i, &mut scratch)?;
+        // --repeat-frames: this frame shows the last one's pixels again, as a game that drew
+        // no new frame does (spec 13, 4.2)
+        rng = rng
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        if i == 0 || ((rng >> 33) as f32 / (1u64 << 31) as f32) >= o.repeat_frames {
+            std::mem::swap(&mut buf, &mut scratch);
+        }
         let f = FrameView {
             seq,
             pts,
@@ -129,20 +149,46 @@ pub fn run(o: Opts) -> Res {
         if let Some(eng) = eng.as_mut() {
             cmds.clear();
             // As if the frame reached us 3 ms after it was shown.
-            eng.on_frame(&f, pts.add_ms(3.0), &mut cmds);
-            for c in &cmds {
-                if let Cmd::Press {
-                    lane, at, release, ..
-                } = *c
-                {
-                    presses[lane as usize] += 1;
-                    if release.ms_since(at) > 60.0 {
-                        holds += 1;
-                    }
-                    if !o.quiet {
-                        writeln!(out, "press lane {lane} at {:.1} ms", at.ms())?;
-                    }
+            let now = pts.add_ms(3.0);
+            while let Some(t) = sched.next_due().filter(|&t| t <= now) {
+                clock.sleep_until(t);
+                sched.fire_due(clock.now(), true, &mut sink, &mut sev);
+            }
+            clock.set(now);
+            for (t, a) in &sink.log[fired..] {
+                if !o.quiet {
+                    writeln!(out, "key {a:?} at {:.1} ms", t.ms())?;
                 }
+            }
+            fired = sink.log.len();
+            eng.on_frame(&f, now, &mut cmds);
+            for c in &cmds {
+                match *c {
+                    Cmd::Press {
+                        id,
+                        lane,
+                        at,
+                        release,
+                    } => {
+                        presses[lane as usize] += 1;
+                        if release.ms_since(at) > 60.0 {
+                            holds += 1;
+                        }
+                        if !o.quiet {
+                            writeln!(
+                                out,
+                                "press lane {lane} at {:.1} ms hold {:.0} ms id {id}",
+                                at.ms(),
+                                release.ms_since(at)
+                            )?;
+                        }
+                    }
+                    Cmd::MoveRelease { id, release } if !o.quiet => {
+                        writeln!(out, "release id {id} at {:.1} ms", release.ms())?;
+                    }
+                    Cmd::MoveRelease { .. } => {}
+                }
+                sched.submit(*c);
             }
         }
         times.push(t0.elapsed().as_secs_f64() * 1e6);
@@ -180,8 +226,24 @@ pub fn run(o: Opts) -> Res {
         }
         std::mem::swap(&mut prev, &mut obs);
     }
+    while let Some(t) = sched.next_due() {
+        clock.sleep_until(t);
+        sched.fire_due(clock.now(), true, &mut sink, &mut sev);
+    }
     out.flush()?;
     println!("frames    {n}, head obs {heads}, trail obs {trails}");
+    if eng.is_some() {
+        let downs = sink
+            .log
+            .iter()
+            .filter(|x| matches!(x.1, KeyAction::Press(_)))
+            .count();
+        println!(
+            "keys      {downs} key downs, {} key ups, {} dropped by the scheduler",
+            sink.log.len() - downs,
+            sched.dropped
+        );
+    }
     if let Some(eng) = &eng {
         println!(
             "plan      presses per lane {presses:?} ({} total, {holds} planned as holds), missed by engine {}, scroll {:.3} px/ms, speed changes {}",

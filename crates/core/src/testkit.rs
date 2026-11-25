@@ -81,6 +81,8 @@ pub struct Scene {
     pub opponent: bool,
     pub jitter_ms: f64,
     pub drop: f64,
+    /// Fraction of frames that show the previous frame again (a game frame shown twice).
+    pub repeat: f64,
 }
 
 fn opp(c: [u8; 3]) -> Opp {
@@ -148,6 +150,7 @@ impl Scene {
             opponent: true,
             jitter_ms: 1.0,
             drop: 0.02,
+            repeat: 0.0,
         }
     }
 

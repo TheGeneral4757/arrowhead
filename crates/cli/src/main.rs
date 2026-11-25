@@ -89,6 +89,10 @@ enum Cmd {
         /// config's profile), and with --plan its offset and the config's timing and style
         #[arg(long, num_args = 0..=1, default_missing_value = "")]
         profile: Option<String>,
+        /// Percent of frames that repeat the previous frame's pixels (a game frame shown
+        /// twice), to test stale frames
+        #[arg(long, default_value_t = 0.0)]
+        repeat_frames: f32,
     },
     /// Calibrate on the live screen, then play. Dry run (no keys) unless --live
     Run {
@@ -204,6 +208,7 @@ fn main() -> ExitCode {
             quiet,
             plan,
             profile,
+            repeat_frames,
         } => {
             if let Some(d) = &debug_png
                 && let Err(e) = std::fs::create_dir_all(d)
@@ -219,6 +224,7 @@ fn main() -> ExitCode {
                 quiet,
                 plan,
                 profile: profile.as_deref(),
+                repeat_frames: repeat_frames / 100.0,
             })
         }
         Cmd::Run {
