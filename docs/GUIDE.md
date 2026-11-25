@@ -25,14 +25,14 @@ Pick one. All builds are on the [releases page](https://github.com/TheGeneral475
 |---|---|---|
 | AppImage (`arrowhead-X.Y.Z-linux-x86_64.AppImage`) | Any Linux distro, one file | In the app: Settings, "Update and restart" |
 | Tarball (`arrowhead-X.Y.Z-linux-x86_64.tar.gz`) | Any Linux distro, unpacked folder | The app tells you; download the new one |
-| AUR (`arrowhead-bin`) | Arch and derivatives | Your package manager |
+| AUR (`arrowhead-bin`, coming soon) | Arch and derivatives | Your package manager |
 | Windows MSI or zip | Windows 10/11 (not yet tested on real hardware) | MSI: in the app. Zip: download the new one |
 
 **AppImage**
 
 ```sh
-chmod +x arrowhead-*-linux-x86_64.AppImage
-./arrowhead-*-linux-x86_64.AppImage
+chmod +x arrowhead-0.2.0-linux-x86_64.AppImage   # the version you downloaded
+./arrowhead-0.2.0-linux-x86_64.AppImage
 ```
 
 It needs `libfuse2` (most distros have it; on Arch: `sudo pacman -S fuse2`) and a 2024 or newer distro (glibc 2.39: Ubuntu 24.04, Fedora 40, Debian 13, Arch or newer). It carries its own WebKit, so it does not need webkit2gtk installed.
@@ -47,7 +47,7 @@ cd arrowhead-*-linux-x86_64 && ./arrowhead
 
 The tarball uses your system's libraries: webkit2gtk-4.1, libsoup3, gtk3.
 
-**Arch:** `yay -S arrowhead-bin` (or `paru -S arrowhead-bin`).
+**Arch:** `yay -S arrowhead-bin` (or `paru -S arrowhead-bin`), coming soon: the package is not on the AUR yet.
 
 Every Linux install also needs PipeWire and xdg-desktop-portal with the backend for your desktop: `xdg-desktop-portal-kde` on KDE Plasma, `xdg-desktop-portal-hyprland` on Hyprland. Most desktops already have these.
 
@@ -117,7 +117,7 @@ What Live shows while playing:
 
 **Overlay.** A small click-through panel over the game with the state, the last judgment and the hit errors. It places itself where it covers neither the lanes nor the HUD (arrowhead reads what is under it). By default (Auto) it shows only when you have one monitor. Show or hide it from Live or Settings at any time; the run goes on.
 
-**Safety.** Keys are only pressed while the game window has focus (alt-tab away and everything is released). A watchdog releases any key held too long, and every key is released when arrowhead stops, crashes or is killed.
+**Safety.** Where arrowhead can check focus (KDE, Windows), keys are only pressed while the game window has focus: alt-tab away and everything is released. Where it cannot (Hyprland for now), it plays and warns, unless "Require the focus guard" is on in Settings, which then refuses to play. A watchdog releases any key held too long, and every key is released when arrowhead stops, crashes or is killed.
 
 ## 5. Styles and match my friend
 

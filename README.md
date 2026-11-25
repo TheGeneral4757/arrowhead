@@ -43,8 +43,8 @@ Downloads are on the [latest release](https://github.com/TheGeneral4757/arrowhea
 **AppImage (any distro, updates in-app):**
 
 ```sh
-chmod +x arrowhead-*-linux-x86_64.AppImage
-./arrowhead-*-linux-x86_64.AppImage
+chmod +x arrowhead-0.2.0-linux-x86_64.AppImage   # the version you downloaded
+./arrowhead-0.2.0-linux-x86_64.AppImage
 ```
 
 Needs `libfuse2` (Arch: `fuse2`) and a 2024 or newer distro (glibc 2.39: Ubuntu 24.04, Fedora 40, Debian 13, Arch). It brings its own WebKit.
@@ -93,7 +93,7 @@ Without it the app still runs, but only in dry run.
 
 **4. Play.** On **Live**, press **Start** (from the song menu or mid-song), then play songs as usual. Turn on **Dry run** to watch without pressing. Pick a play style on the **Style** page; results land in **History**.
 
-**Hotkeys:** F8 pause, F12 panic (release all and stop), F9 / F10 nudge the offset (Max) or the target (styles). Keys are only pressed while the game window has focus.
+**Hotkeys:** F8 pause, F12 panic (release all and stop), F9 / F10 nudge the offset (Max) or the target (styles). Keys are only pressed while the game window has focus (on KDE; where focus cannot be checked, as on Hyprland, it plays and warns unless Settings requires the focus guard).
 
 **If something is off:** see [troubleshooting](docs/GUIDE.md#10-troubleshooting), or Settings, "Copy diagnostics" for a bug report.
 

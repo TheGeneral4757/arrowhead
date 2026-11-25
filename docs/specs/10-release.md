@@ -22,7 +22,7 @@ Linux runtime deps (documented in README): webkit2gtk-4.1, libsoup3, gtk3, pipew
 
 ## AppImage (v0.2)
 - `crates/app/tauri.appimage.conf.json` is passed with `--config` only for the release and CI builds, so `tauri dev` on Linux needs no sidecar: it adds the overlay as `externalBin` (Tauri needs the target-suffixed copy `arrowhead-overlay-x86_64-unknown-linux-gnu` first) and the OCR models and THIRD_PARTY_NOTICES.md as resources. In the AppDir the overlay sits next to the app in `usr/bin` (where `overlay::binary` looks) and the models in `usr/lib/arrowhead/models`, which `arrowhead-ocr` searches as `<exe dir>/../lib/arrowhead/models`.
-- linuxdeploy runs with `APPIMAGE_EXTRACT_AND_RUN=1` (no FUSE on the runner); the runner also needs `file` and `librsvg2-dev`. It bundles WebKitGTK, so the AppImage is large and needs only `libfuse2` on the host. On the Arch dev box linuxdeploy's gtk plugin fails on host libraries (VMware's gdk-pixbuf, missing libcroco): build AppImages on Ubuntu (CI).
+- linuxdeploy runs with `APPIMAGE_EXTRACT_AND_RUN=1` (no FUSE on the runner); the runner also needs `file` and `librsvg2-dev`. It bundles WebKitGTK, so the AppImage is large and needs, on the host, `libfuse2`, glibc 2.39 or newer and the same portals and PipeWire as any install. On the Arch dev box linuxdeploy's gtk plugin fails on host libraries (VMware's gdk-pixbuf, missing libcroco): build AppImages on Ubuntu (CI).
 - `ci.yml` job `appimage` builds it on every pull request and checks the app, overlay and both models are inside.
 - The app sees `$APPIMAGE` and offers "Update and restart" (`can_install`); the updater replaces the AppImage file.
 
