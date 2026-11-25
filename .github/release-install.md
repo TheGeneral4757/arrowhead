@@ -1,6 +1,6 @@
 ### Install
 
-**Any distro (AppImage, updates in-app):** download `arrowhead-@VERSION@-linux-x86_64.AppImage`, then `chmod +x arrowhead-@VERSION@-linux-x86_64.AppImage && ./arrowhead-@VERSION@-linux-x86_64.AppImage`. Needs `libfuse2`.
+**Any distro (AppImage, updates in-app):** download `arrowhead-@VERSION@-linux-x86_64.AppImage`, then `chmod +x arrowhead-@VERSION@-linux-x86_64.AppImage && ./arrowhead-@VERSION@-linux-x86_64.AppImage`. Needs `libfuse2` and glibc 2.39 or newer (Ubuntu 24.04, Fedora 40, Debian 13, Arch).
 
 **Arch (AUR):** `yay -S arrowhead-bin` (or `paru -S arrowhead-bin`). Updates come from your package manager.
 

@@ -47,7 +47,7 @@ chmod +x arrowhead-*-linux-x86_64.AppImage
 ./arrowhead-*-linux-x86_64.AppImage
 ```
 
-Needs `libfuse2` (Arch: `fuse2`). It brings its own WebKit.
+Needs `libfuse2` (Arch: `fuse2`) and a 2024 or newer distro (glibc 2.39: Ubuntu 24.04, Fedora 40, Debian 13, Arch). It brings its own WebKit.
 
 **Arch (AUR):** `yay -S arrowhead-bin` (coming soon). Updates come from your package manager.
 

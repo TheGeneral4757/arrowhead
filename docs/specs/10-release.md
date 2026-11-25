@@ -13,7 +13,7 @@ milestone: M5
 ## Release build (`.github/workflows/release.yml`, on tag)
 | Runner | Build | Assets |
 |---|---|---|
-| ubuntu-24.04 | `cargo build --release` for cli and overlay; `tauri build --bundles appimage --config crates/app/tauri.appimage.conf.json` for the app (v0.2) | `arrowhead-X.Y.Z-linux-x86_64.tar.gz` (app, cli, overlay, `models/`, LICENSE, THIRD_PARTY_NOTICES.md, README, `arrowhead.desktop`, `icons/{32,128,256,512}.png`) and `arrowhead-X.Y.Z-linux-x86_64.AppImage` |
+| ubuntu-24.04 (glibc 2.39: Ubuntu 22.04 has PipeWire 0.3.48, too old for the `pipewire` crate) | `cargo build --release` for cli and overlay; `tauri build --bundles appimage --config crates/app/tauri.appimage.conf.json` for the app (v0.2) | `arrowhead-X.Y.Z-linux-x86_64.tar.gz` (app, cli, overlay, `models/`, LICENSE, THIRD_PARTY_NOTICES.md, README, `arrowhead.desktop`, `icons/{32,128,256,512}.png`) and `arrowhead-X.Y.Z-linux-x86_64.AppImage` |
 | windows-latest (v0.2) | `tauri build` with the MSI bundler | `arrowhead-X.Y.Z-windows-x86_64.msi`, portable `arrowhead-X.Y.Z-windows-x86_64.zip` |
 
 Plus `SHA256SUMS` and the updater manifest `latest.json`, whose `linux-x86_64` entry is the AppImage (v0.2; it was the tarball in v0.1), signed with `tauri signer sign` and the Tauri updater key (secret `TAURI_SIGNING_PRIVATE_KEY` in repo secrets; the public key is in `tauri.conf.json`).

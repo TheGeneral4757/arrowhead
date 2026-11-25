@@ -35,7 +35,7 @@ chmod +x arrowhead-*-linux-x86_64.AppImage
 ./arrowhead-*-linux-x86_64.AppImage
 ```
 
-It needs `libfuse2` (most distros have it; on Arch: `sudo pacman -S fuse2`). It carries its own WebKit, so it does not need webkit2gtk installed.
+It needs `libfuse2` (most distros have it; on Arch: `sudo pacman -S fuse2`) and a 2024 or newer distro (glibc 2.39: Ubuntu 24.04, Fedora 40, Debian 13, Arch or newer). It carries its own WebKit, so it does not need webkit2gtk installed.
 
 **Tarball**
 
