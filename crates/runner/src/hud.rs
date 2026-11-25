@@ -20,7 +20,7 @@ use arrowhead_core::event::{EngineEvent, HudView, Level, Stats};
 use arrowhead_core::frame::{AuxTap, OwnedFrame, Rect};
 use arrowhead_core::hud::readback::{Readback, SentPress};
 use arrowhead_core::hud::{
-    Atlas, Counts, Face, HudReader, Layout, Locations, ResultsRead, StatsRead,
+    Atlas, Counts, Face, Guard, HudReader, Layout, Locations, ResultsRead, StatsRead, Verdict,
 };
 use arrowhead_core::rival::{Matcher, our_side, ours_theirs};
 use arrowhead_core::time::Nanos;
@@ -69,6 +69,8 @@ pub struct HudSetup {
     pub max_sad: f32,
     pub offset_ms: f32,
     pub readback_sign: f32,
+    /// `game.stats_mean_sign`: Mean MS on the stats panel times this is the popup's ms (G14).
+    pub stats_mean_sign: f32,
     pub windows: Windows,
     pub style: String,
     pub target: Option<f32>,
@@ -102,6 +104,11 @@ struct Song {
     stats: Option<StatsRead>,
     counts: Option<Counts>,
     hit_errs: Vec<f32>,
+    /// Matched readbacks as `hit - intended`, ms: the timing error the offset owns.
+    resid: Vec<f32>,
+    /// Offset in force before each matched readback, summed; and the song's starting offset.
+    bias_sum: f64,
+    start_bias: f32,
     ms_taught: bool,
     zeros_taught: bool,
     /// Per-lane and per-class timing errors this song, and the corrections now applied.
@@ -290,6 +297,8 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
     // The class of each press in `presses`, same order.
     let mut classes: VecDeque<Class> = VecDeque::with_capacity(64);
     let mut song = Song::default();
+    // A saved offset to start the next song from (`finish_song`).
+    let mut offset_due: Option<f32> = None;
     let mut pending: Option<PendingResults> = None;
     let (mut seq, mut last_pts, mut last_stats_at) = (0u64, Nanos(0), Instant::now());
     let mut requested: Vec<Rect> = vec![];
@@ -298,6 +307,11 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
     let mut last_score_find = Instant::now() - SCORE_FIND_EVERY;
     let mut last_stats_emit = Instant::now();
     let mut dirty_atlas = false;
+    // Consistency guard (spec 13, 1.2): the stats face as of the last read that checked out,
+    // and whether anything was taught since.
+    let mut guard = Guard::default();
+    let mut good_stats: Option<Atlas> = None;
+    let mut unproven = false;
     let mut title_rect: Option<Rect> = s
         .hud
         .title
@@ -355,7 +369,15 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                             Level::Info,
                             "results screen: next song began, using the last live reading",
                         );
-                        finish_song(&mut book, book_path.as_deref(), &s, &style_id, p, None, &tx);
+                        offset_due = finish_song(
+                            &mut book,
+                            book_path.as_deref(),
+                            &s,
+                            &style_id,
+                            p,
+                            None,
+                            &tx,
+                        );
                     }
                     song = Song {
                         started: Some(SystemTime::now()),
@@ -374,20 +396,21 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                             "match my friend: off for Max (no target to move)",
                         );
                     }
-                    // Each song starts with a fast average from the offset it ended on.
+                    // Each song starts with a fast average from the saved offset (or, if the last
+                    // song saved none, the one it ended on).
                     let sign = rb.sign;
-                    rb = Readback::new(rb.bias_ms);
+                    rb = Readback::new(offset_due.take().unwrap_or(rb.bias_ms));
                     rb.sign = sign;
+                    song.start_bias = rb.bias_ms;
+                    let _ = out.send(FromHud::Offset(rb.bias_ms));
                     let _ = out.send(FromHud::Corrections([0.0; 4], [0.0; 3]));
+                    guard.reset();
                 }
                 Ok(ToHud::SongOver {
                     offset_ms,
                     engine_missed,
                     watchdog,
                 }) => {
-                    if !song.hit_errs.is_empty() {
-                        save_bias(&s, rb.bias_ms, &tx);
-                    }
                     let done = PendingResults {
                         song: std::mem::take(&mut song),
                         offset_ms,
@@ -400,7 +423,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                     if ocr.is_some() {
                         // the row waits for the results screen's exact numbers
                         if let Some(old) = pending.replace(done) {
-                            finish_song(
+                            offset_due = finish_song(
                                 &mut book,
                                 book_path.as_deref(),
                                 &s,
@@ -411,7 +434,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                             );
                         }
                     } else {
-                        finish_song(
+                        offset_due = finish_song(
                             &mut book,
                             book_path.as_deref(),
                             &s,
@@ -450,7 +473,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                 Level::Info,
                 "results screen not read: using the last live reading",
             );
-            finish_song(&mut book, book_path.as_deref(), &s, &style_id, p, None, &tx);
+            offset_due = finish_song(&mut book, book_path.as_deref(), &s, &style_id, p, None, &tx);
         }
         let Some(tap) = &tap else {
             // No HUD: still write history rows (without the game's numbers).
@@ -571,6 +594,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                         let sign = rb.sign;
                         rb = Readback::new(o);
                         rb.sign = sign;
+                        song.start_bias = o;
                         let _ = out.send(FromHud::Offset(o));
                     }
                     song.applied = (start.lane_ms, start.class_ms);
@@ -643,6 +667,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                     }
                     if taught > 0 {
                         dirty_atlas = true;
+                        unproven = true;
                         log(
                             &tx,
                             Level::Info,
@@ -660,6 +685,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                 } => {
                     if rd.teach_ms_at(&frame.view(), rect, v) {
                         dirty_atlas = true;
+                        unproven = true;
                         log(
                             &tx,
                             Level::Info,
@@ -678,7 +704,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                             Level::Info,
                             "results screen read: history row uses its numbers",
                         );
-                        finish_song(
+                        offset_due = finish_song(
                             &mut book,
                             book_path.as_deref(),
                             &s,
@@ -719,6 +745,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                             && rd.teach_score_at(&crop.view(), crop.region, v)
                         {
                             dirty_atlas = true;
+                            unproven = true;
                             log(
                                 &tx,
                                 Level::Info,
@@ -787,6 +814,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                     ok &= rd.teach_stack(&f.view(), Layout::Counts, &["0"; 5]).is_ok();
                 }
                 dirty_atlas |= ok;
+                unproven |= ok;
                 log(
                     &tx,
                     if ok { Level::Info } else { Level::Warn },
@@ -813,12 +841,13 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                 && rd.teach_row(&f.view(), Layout::Stats, r, 3, &(h + 1).to_string())
             {
                 dirty_atlas = true;
+                unproven = true;
                 st = rd.read_stats(&f.view(), r);
             }
             // First hit: Mean MS is that hit's ms, which teaches the ms readout's font (G14).
             if !song.ms_taught
                 && st.hits == Some(1)
-                && let Some(m) = st.mean_ms
+                && let Some(m) = st.mean_ms.map(|m| m * s.stats_mean_sign)
             {
                 song.ms_taught = true;
                 // at the readout found by OCR, else searched for in our playfield
@@ -830,6 +859,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                 };
                 if kept {
                     dirty_atlas = true;
+                    unproven = true;
                     save_regions(&s, &rd.locs, &tx);
                     log(
                         &tx,
@@ -851,6 +881,37 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                 song.label_rgb = crate::ocrteach::label_colours(&f.view(), r);
             }
         }
+        if let (Some(st), Some(c)) = (song.stats, song.counts) {
+            match guard.check(&st, &c) {
+                Verdict::Good if unproven || good_stats.is_none() => {
+                    good_stats = Some(rd.atlas.clone());
+                    unproven = false;
+                }
+                Verdict::Bad => {
+                    let back = good_stats.as_ref().filter(|_| unproven);
+                    rd.atlas
+                        .set_face(Face::Stats, back.unwrap_or(&Atlas::default()));
+                    log(
+                        &tx,
+                        Level::Warn,
+                        if back.is_some() {
+                            "HUD: stats and counts disagree: last teach undone"
+                        } else {
+                            "HUD: stats and counts disagree: relearning the stats font"
+                        },
+                    );
+                    if back.is_none() {
+                        good_stats = None;
+                        next_teach = Instant::now();
+                    }
+                    unproven = false;
+                    dirty_atlas = true;
+                    song.stats = None;
+                    song.counts = None;
+                }
+                _ => {}
+            }
+        }
 
         // Readback.
         if let Some(r) = rd.locs.ms
@@ -867,6 +928,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                 && let (Some(pm), Some(ph), Some(nm), Some(nh)) =
                     (p.mean_ms, p.hits, n.mean_ms, n.hits)
                 && let Some((expected, tol)) = crate::ocrteach::hit_ms_from_mean(pm, ph, nm, nh)
+                    .map(|(v, tol)| (v * s.stats_mean_sign, tol))
                 && let Some(w) = ocr.as_mut()
             {
                 w.offer(crate::ocrwork::Job::Ms {
@@ -879,8 +941,11 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
             match read {
                 (_, true) => rb.on_blank(),
                 (Some(raw), _) if (raw * rb.sign).abs() <= s.windows.bad + 20.0 => {
+                    let before = rb.bias_ms;
                     if let Some(m) = rb.on_read(pts, raw, None, presses.make_contiguous()) {
                         song.hit_errs.push(m.hit_error_ms);
+                        song.resid.push(m.hit_error_ms - m.intended_err_ms);
+                        song.bias_sum += f64::from(before);
                         // The readout is drawn in its judgment's colour; else the count that went
                         // up; else the (unverified) windows.
                         let by_colour = song.label_rgb.and_then(|labels| {
@@ -1122,7 +1187,7 @@ fn finish_song(
     mut p: PendingResults,
     results: Option<ResultsRead>,
     tx: &Tx,
-) {
+) -> Option<f32> {
     if let Some(r) = &results {
         p.song.counts = Some(r.counts);
         if let Some(a) = r.accuracy {
@@ -1139,7 +1204,65 @@ fn finish_song(
         results.as_ref(),
         tx,
     );
-    record_song(book, book_path, s, style_id, &p.song, p.bias_ms, tx);
+    let target = offset_target(
+        &p.song,
+        p.bias_ms,
+        results.and_then(|r| r.mean_ms).map(|m| m * s.readback_sign),
+    );
+    record_song(book, book_path, s, style_id, &p.song, target, tx);
+    save_bias(s, target?, tx)
+}
+
+/// Matched readbacks the offset needs from a song, and the most their spread (median absolute
+/// deviation, ms) may be, before it moves the saved offset (spec 13, 1.3).
+const SAVE_MIN_READBACKS: usize = 30;
+const SAVE_MAX_MAD_MS: f32 = 8.0;
+/// The most the saved offset moves per song, ms.
+const SAVE_STEP_MS: f32 = 1.0;
+/// Hits the results screen's Mean MS needs to count (spec 13, 1.5).
+const RESULTS_MIN_HITS: u32 = 30;
+
+fn median(v: &mut [f32]) -> f32 {
+    v.sort_by(f32::total_cmp);
+    let n = v.len();
+    if n % 2 == 1 {
+        v[n / 2]
+    } else {
+        (v[n / 2 - 1] + v[n / 2]) / 2.0
+    }
+}
+
+fn mad(v: &[f32]) -> f32 {
+    let mut a = v.to_vec();
+    let m = median(&mut a);
+    let mut d: Vec<f32> = v.iter().map(|x| (x - m).abs()).collect();
+    median(&mut d)
+}
+
+/// The offset this song says is right, or `None` when it says too little. The results
+/// screen's Mean MS (`late_ms`: positive = late; every hit, no font) wins: the offset in force
+/// on average, minus the late error it measured (less what the style meant). Else the live
+/// readback's end value, when it had enough readbacks with a small spread.
+fn offset_target(song: &Song, live_end: f32, late_ms: Option<f32>) -> Option<f32> {
+    let n = song.resid.len();
+    let avg_bias = if n > 0 {
+        (song.bias_sum / n as f64) as f32
+    } else {
+        song.start_bias
+    };
+    let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len().max(1) as f32;
+    let intended = mean(&song.hit_errs) - mean(&song.resid);
+    let c = song.counts.unwrap_or_default();
+    let hits: u32 = [c.sick, c.good, c.ok, c.bad].iter().flatten().sum();
+    match late_ms {
+        Some(late) if hits >= RESULTS_MIN_HITS => Some(avg_bias - (late - intended)),
+        _ => (n >= SAVE_MIN_READBACKS && mad(&song.resid) <= SAVE_MAX_MAD_MS).then_some(live_end),
+    }
+}
+
+/// `saved` moved toward `target` by at most `SAVE_STEP_MS`.
+fn step_toward(saved: f32, target: f32) -> f32 {
+    saved + (target - saved).clamp(-SAVE_STEP_MS, SAVE_STEP_MS)
 }
 
 /// The play goes into the song's memory (`songs.json`): offset and corrections (when enough
@@ -1150,7 +1273,7 @@ fn record_song(
     s: &HudSetup,
     style_id: &str,
     song: &Song,
-    bias_ms: f32,
+    offset: Option<f32>,
     tx: &Tx,
 ) {
     let (Some(key), Some(started)) = (&song.key, song.started) else {
@@ -1163,8 +1286,13 @@ fn record_song(
             name: &song.name,
             difficulty: &song.difficulty,
             when: &when,
-            readbacks: song.hit_errs.len() as u32,
-            offset_ms: bias_ms,
+            // a song that did not pass the offset checks keeps no offset or corrections
+            readbacks: if offset.is_some() {
+                song.hit_errs.len() as u32
+            } else {
+                0
+            },
+            offset_ms: offset.unwrap_or(0.0),
             lane_ms: song.bias.lanes_ms(),
             class_ms: song.bias.classes_ms(),
             style: style_id,
@@ -1195,19 +1323,28 @@ fn save_regions(s: &HudSetup, locs: &Locations, tx: &Tx) {
 }
 
 /// Readback's offset becomes the profile's `game_bias_ms`, the next run's start (spec 04).
-fn save_bias(s: &HudSetup, bias_ms: f32, tx: &Tx) {
-    let Some(p) = &s.prof_path else { return };
+/// Moves the profile's `game_bias_ms` toward `target` by at most `SAVE_STEP_MS`; returns the
+/// value saved.
+fn save_bias(s: &HudSetup, target: f32, tx: &Tx) -> Option<f32> {
+    let p = s.prof_path.as_ref()?;
     let saved = load_toml::<Profile>(p).and_then(|mut prof| {
-        prof.latency.game_bias_ms = bias_ms;
-        save_toml(p, &prof)
+        let v = step_toward(prof.latency.game_bias_ms, target);
+        prof.latency.game_bias_ms = v;
+        save_toml(p, &prof).map(|()| v)
     });
     match saved {
-        Ok(()) => log(
-            tx,
-            Level::Info,
-            format!("offset {bias_ms:+.1} ms saved to the profile"),
-        ),
-        Err(e) => log(tx, Level::Warn, format!("offset not saved: {e}")),
+        Ok(v) => {
+            log(
+                tx,
+                Level::Info,
+                format!("offset {v:+.2} ms saved to the profile (this song said {target:+.2})"),
+            );
+            Some(v)
+        }
+        Err(e) => {
+            log(tx, Level::Warn, format!("offset not saved: {e}"));
+            None
+        }
     }
 }
 
@@ -1329,6 +1466,36 @@ mod tests {
         assert_eq!(h.counts[0], 1);
         assert_eq!(h.counts[24], 2);
         assert_eq!(h.counts[HIST_BINS - 1], 1, "outliers land in the end bins");
+    }
+
+    #[test]
+    fn offset_save_is_gated_and_stepped() {
+        // 3 readbacks: nothing to save
+        let mut song = Song {
+            resid: vec![4.0; 3],
+            hit_errs: vec![4.0; 3],
+            bias_sum: 3.0 * 2.58,
+            start_bias: 2.58,
+            ..Song::default()
+        };
+        assert_eq!(offset_target(&song, -1.0, None), None);
+        // 40 tight readbacks: the live end value, moved at most 1 ms
+        song.resid = (0..40).map(|i| 4.0 + (i % 3) as f32).collect();
+        song.hit_errs = song.resid.clone();
+        song.bias_sum = 40.0 * 2.58;
+        assert_eq!(offset_target(&song, -1.0, None), Some(-1.0));
+        assert!((step_toward(2.58, -1.0) - 1.58).abs() < 1e-5);
+        // wide spread: not trusted
+        song.resid = (0..40).map(|i| if i % 2 == 0 { -30.0 } else { 30.0 }).collect();
+        assert_eq!(offset_target(&song, -1.0, None), None);
+        // results Mean MS -4.0 (4 ms late) over 700 hits at +2.58 in force: -1.42
+        song.counts = Some(Counts {
+            sick: Some(700),
+            ..Counts::default()
+        });
+        song.hit_errs = song.resid.clone();
+        let t = offset_target(&song, 9.0, Some(4.0)).unwrap();
+        assert!((t - -1.42).abs() < 1e-3, "{t}");
     }
 
     #[test]

@@ -517,6 +517,7 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
             max_sad: dcfg_hud.glyph_max_sad,
             offset_ms: offset_ms as f32,
             readback_sign: f32::from(cfg.game.readback_sign),
+            stats_mean_sign: f32::from(cfg.game.stats_mean_sign),
             windows: cfg.game.windows_ms.clone(),
             style: style_name,
             target: style_target,

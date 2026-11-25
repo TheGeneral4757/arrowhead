@@ -1,6 +1,6 @@
 ---
 created: 2026-11-24
-status: planned
+status: in progress
 ---
 
 # 13 Accuracy plan (v0.2 fixes from the 2026-11-24 clips)
@@ -31,6 +31,8 @@ Game facts found (now in [12](12-open-questions.md)): the stats panel's Mean MS 
 Each phase ends with its check. Phases 1 and 2 must land before PR #12 merges.
 
 ### Phase 1: stop feeding bad numbers to timing (v0.2 blocker)
+Status (2026-11-25): built. 1.2 is `core/src/hud/guard.rs`: a contradiction must hold on 3 stable reads (same numbers two ticks running); it then restores the stats face from the last read that checked out if something was taught since, else forgets the stats face so OCR relearns it. 1.4: the atlas file version is now 2 (old files are ignored); the dev box's `game_bias_ms` was set to -2.5 by hand (backup `default.toml.bak-1125`).
+
 | # | Change | Where | Done when |
 |---|---|---|---|
 | 1.1 | Mean MS sign: new `[game] stats_mean_sign = -1` (config, not a constant). Apply it in `teach_ms_at` / `teach_ms_first_hit` and `hit_ms_from_mean` | `core/src/hud/mod.rs`, `runner/src/ocrteach.rs`, `core/src/config.rs`, spec 08 | Teaching on a frame with popup "-2.13 ms" learns the `-` glyph and reads -2.13 |

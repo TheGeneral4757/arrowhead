@@ -198,6 +198,8 @@ pub struct Game {
     pub windows_ms: Windows,
     pub accuracy_weights: AccuracyWeights,
     pub readback_sign: i8,
+    /// The stats panel's Mean MS against the ms popup: -1 = opposite sign (confirmed, G14).
+    pub stats_mean_sign: i8,
     /// Which side of the stage we play on: our score, stats and counts are on that side.
     pub seat: Seat,
 }
@@ -219,6 +221,7 @@ impl Default for Game {
                 miss: 0.0,
             },
             readback_sign: -1,
+            stats_mean_sign: -1,
             seat: Seat::Auto,
         }
     }

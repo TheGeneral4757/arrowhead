@@ -50,7 +50,8 @@ struct Word {
 const AMBIGUOUS: f32 = 0.02;
 const MAX_EXAMPLES: usize = 6;
 const MAGIC: &[u8; 4] = b"AHGL";
-const VERSION: u8 = 1;
+/// 2: atlases saved before the Mean MS sign fix (spec 13, 1.4) may hold mis-taught digits.
+const VERSION: u8 = 2;
 
 #[derive(Clone, Debug, Default)]
 pub struct Atlas {
@@ -86,6 +87,13 @@ impl Atlas {
         v.sort_unstable();
         v.dedup();
         v.into_iter().collect()
+    }
+
+    /// Replace `face`'s glyphs with `from`'s (an empty atlas forgets them); labels stay.
+    pub fn set_face(&mut self, face: Face, from: &Atlas) {
+        self.glyphs.retain(|g| g.face != face);
+        self.glyphs
+            .extend(from.glyphs.iter().filter(|g| g.face == face).cloned());
     }
 
     pub fn add_glyph(&mut self, face: Face, ch: char, c: &Cell) {

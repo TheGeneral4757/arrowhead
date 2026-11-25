@@ -105,6 +105,7 @@ export type Config = {
     windows_ms: { sick: number; good: number; ok: number; bad: number };
     accuracy_weights: { sick: number; good: number; ok: number; bad: number; miss: number };
     readback_sign: number;
+    stats_mean_sign: number;
     seat: "auto" | "left" | "right";
   };
   match_friend: { on: boolean; margin_pct: number };

@@ -4,10 +4,12 @@
 //! Runs on the hud thread (10-20 Hz); nothing here spawns or does I/O except `Atlas::save/load`.
 
 pub mod atlas;
+pub mod guard;
 pub mod readback;
 mod text;
 
 pub use atlas::{Atlas, Face};
+pub use guard::{Guard, Verdict};
 pub use readback::{Matched, Readback, SentPress};
 
 use crate::frame::{FrameView, Rect};
