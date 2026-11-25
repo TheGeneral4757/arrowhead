@@ -256,11 +256,13 @@ fn start_engine(
                 if g.is_none() {
                     *g = Some(open_source(false)?);
                 }
-                // Without a writable uinput only dry runs are possible.
-                let live_keys = std::fs::OpenOptions::new()
-                    .write(true)
-                    .open("/dev/uinput")
-                    .is_ok();
+                // Linux: without a writable uinput only dry runs are possible. Windows sends
+                // keys with SendInput, which needs no device.
+                let live_keys = cfg!(windows)
+                    || std::fs::OpenOptions::new()
+                        .write(true)
+                        .open("/dev/uinput")
+                        .is_ok();
                 if !live_keys {
                     arrowhead_runner::log(
                         &tx,
