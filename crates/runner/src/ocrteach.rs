@@ -566,11 +566,26 @@ pub fn locate(lines: &Lines, playfield: Option<(i32, i32)>, stream_w: u32) -> Fo
 
 /// Song title and difficulty from the title line: "Pack - Song (Difficulty)".
 pub fn title(t: &str) -> (String, String) {
-    let t = t.trim();
-    match (t.rfind('('), t.rfind(')')) {
-        (Some(a), Some(b)) if b > a => (t[..a].trim().to_string(), t[a + 1..b].trim().to_string()),
-        _ => (t.to_string(), String::new()),
+    let mut t = t.trim().to_string();
+    // a "By: author" line run into the title
+    if let Some(i) = t.to_ascii_uppercase().find("BY:") {
+        t.truncate(i);
     }
+    // the rate "(2.00x)" is not part of the name (`rate` reads it)
+    if let Some(i) = t.rfind('(')
+        && rate(&t[i..]).is_some()
+    {
+        t.truncate(i);
+    }
+    let t = t.trim();
+    // the difficulty: the last bracket of letters only (OCR may lose its ")")
+    if let Some(a) = t.rfind('(') {
+        let inner = t[a + 1..].trim_end_matches(')').trim();
+        if !inner.is_empty() && inner.chars().all(|c| c.is_alphabetic() || c == ' ') {
+            return (t[..a].trim().to_string(), inner.to_string());
+        }
+    }
+    (t.to_string(), String::new())
 }
 
 /// Song rate from a title's "(2.00x)" (OCR often drops the dot: "(200X)"). The game's ms are
@@ -814,6 +829,30 @@ pub fn judgment_by_colour(rgb: [f32; 3], labels: &[[f32; 3]; 5]) -> Option<usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn title_parts() {
+        let t = |s| {
+            let (n, d) = title(s);
+            (n, d)
+        };
+        assert_eq!(
+            t("VS CAMELLIA GHOST (VIP) (MANIAC) (200X)"),
+            ("VS CAMELLIA GHOST (VIP)".into(), "MANIAC".into())
+        );
+        assert_eq!(
+            t("ONLINE VS CHALLENGESACCELERANT (INSANE"),
+            ("ONLINE VS CHALLENGESACCELERANT".into(), "INSANE".into())
+        );
+        assert_eq!(
+            t("Pico vs Matt - Shot (Hard) By: someone"),
+            ("Pico vs Matt - Shot".into(), "Hard".into())
+        );
+        assert_eq!(
+            t("SKY REMANIFESTED MANIFEST"),
+            ("SKY REMANIFESTED MANIFEST".into(), String::new())
+        );
+    }
 
     #[test]
     fn song_rate_from_title() {

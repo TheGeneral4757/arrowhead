@@ -220,6 +220,51 @@ impl SongBook {
         self.songs.get(key)
     }
 
+    /// The key to use for a song read as `key`: an entry whose title is the same or within two
+    /// OCR slips of it (letters and digits only, look-alike digits folded; 8+ chars), else
+    /// `key` itself. Other entries that match are merged into it, so one song played twice has
+    /// one entry even when OCR spelled it differently (spec 13, 5.4). "Ghost (VIP)" and "Ghost"
+    /// differ by three letters and stay apart.
+    pub fn resolve(&mut self, key: &str) -> String {
+        let c = canon(key);
+        let near: Vec<String> = self
+            .songs
+            .keys()
+            .filter(|k| {
+                let o = canon(k);
+                o == c || (c.len() >= 8 && edits(o.as_bytes(), c.as_bytes()) <= 2)
+            })
+            .cloned()
+            .collect();
+        let Some(target) = near
+            .iter()
+            .find(|k| *k == key)
+            .or_else(|| near.iter().max_by_key(|k| self.songs[*k].plays))
+            .cloned()
+        else {
+            return key.to_string();
+        };
+        for k in near.iter().filter(|k| **k != target) {
+            let o = self.songs.remove(k).expect("listed");
+            let t = self.songs.get_mut(&target).expect("listed");
+            t.plays += o.plays;
+            if o.last_played > t.last_played {
+                t.last_played = o.last_played;
+                if o.offset_ms.is_some() {
+                    (t.offset_ms, t.lane_ms, t.class_ms) = (o.offset_ms, o.lane_ms, o.class_ms);
+                }
+                t.max_note = o.max_note.or(t.max_note);
+                t.styles.extend(o.styles);
+            } else {
+                for (st, m) in o.styles {
+                    t.styles.entry(st).or_insert(m);
+                }
+                t.offset_ms = t.offset_ms.or(o.offset_ms);
+            }
+        }
+        target
+    }
+
     pub fn record_play(&mut self, key: &str, r: &PlayRecord) {
         let s = self.songs.entry(key.to_string()).or_default();
         s.name = r.name.to_string();
@@ -281,9 +326,80 @@ impl SongBook {
     }
 }
 
+/// A title as OCR could have read it: letters and digits only, upper case, digit look-alikes
+/// folded to letters.
+fn canon(t: &str) -> String {
+    t.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| match c.to_ascii_uppercase() {
+            '0' => 'O',
+            '1' => 'I',
+            '5' => 'S',
+            '8' => 'B',
+            u => u,
+        })
+        .collect()
+}
+
+fn edits(a: &[u8], b: &[u8]) -> usize {
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, &x) in a.iter().enumerate() {
+        let mut cur = vec![i + 1];
+        for (j, &y) in b.iter().enumerate() {
+            cur.push(
+                (prev[j] + usize::from(x != y))
+                    .min(prev[j + 1] + 1)
+                    .min(cur[j] + 1),
+            );
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_song_one_entry_despite_ocr() {
+        let mut b = SongBook::default();
+        let play = |when| PlayRecord {
+            name: "Deathmatch",
+            difficulty: "Hard",
+            when,
+            readbacks: 30,
+            offset_ms: -2.0,
+            lane_ms: [0.0; 4],
+            class_ms: [0.0; 3],
+            style: "max",
+            target: 100.0,
+            final_accuracy: Some(100.0),
+            max_note: None,
+        };
+        let k = b.resolve(&SongBook::key("VS Matt WIIK 3 Deathmatch Hard"));
+        b.record_play(&k, &play("2026-11-25T01:00:00Z"));
+        // read again with a 3 as S and a missing space: the same entry
+        let k2 = b.resolve(&SongBook::key("VS MATT WIIK S DEATHMATCH HARD"));
+        assert_eq!(k2, k);
+        b.record_play(&k2, &play("2026-11-25T02:00:00Z"));
+        assert_eq!((b.songs.len(), b.songs[&k].plays), (1, 2));
+        // a different song stays apart
+        assert_ne!(
+            b.resolve(&SongBook::key("VS Matt WIIK 3 Deathmatch Hard VIP")),
+            k
+        );
+        // two entries saved apart earlier are merged into the one with more plays
+        b.songs.insert(
+            "vs matt wiik3 deathmatch hard".into(),
+            Song {
+                plays: 1,
+                ..Song::default()
+            },
+        );
+        let k3 = b.resolve(&SongBook::key("vs matt wiik 3 deathmatch hard"));
+        assert_eq!((b.songs.len(), b.songs[&k3].plays), (1, 3));
+    }
 
     #[test]
     fn bias_zero_without_data_and_with_uniform_data() {

@@ -627,7 +627,9 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                 Done::Title(Some(t)) => {
                     let (name, difficulty) = crate::ocrteach::title(&t);
                     song.rate = crate::ocrteach::rate(&t);
-                    let key = SongBook::key(&t);
+                    // one entry per song: the rate is left out (offsets are real ms) and an
+                    // entry OCR spelled a little differently is reused
+                    let key = book.resolve(&SongBook::key(&format!("{name} {difficulty}")));
                     let start =
                         book.start_values(&key, &style_id, f64::from(s.target.unwrap_or(100.0)));
                     if let Some(o) = start.offset_ms {
