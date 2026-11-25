@@ -48,7 +48,7 @@ release-please opens the release PR; merging it tags `vX.Y.Z` and runs `release.
 | Dev app | `npm --prefix ui run tauri dev` |
 | Release app | `npm --prefix ui run tauri build` (never `cargo build --release -p arrowhead-app` alone: it skips the UI build) |
 | CLI | `cargo run -p arrowhead-cli -- <capture|record|replay|import|detect|run|bench|diag>` |
-| Detect on a clip | `cargo run --release -p arrowhead-cli -- detect clip.ahclip -q --plan --debug-png out/ --every 60` |
+| Detect on a clip | `cargo run --release -p arrowhead-cli -- detect clip.ahclip -q --plan --debug-png out/ --every 60` (add `--profile` to start like a live run: saved layout, colours, offset, style) |
 | Play (dry run, no keys) | `cargo run --release -p arrowhead-cli -- run --seconds 60` (add `--live` to send keys) |
 | Focus probe / scheduler bench | `cargo run --release -p arrowhead-cli -- focus` / `-- bench` |
 | Input latency test (reference only, not used as offset) | `cargo run --release -p arrowhead-cli -- latency` |

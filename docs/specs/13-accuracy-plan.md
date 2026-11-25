@@ -54,6 +54,8 @@ Status (2026-11-25): built. The run overlay is one panel (pill, judgment, error 
 Later option: capture the Sober window instead of the monitor (open question P8), which removes the overlay from the frames entirely.
 
 ### Phase 3: tools to see live misses
+Status (2026-11-25): 3.1 built (`detect --profile [NAME]`). On `ghost-62.ahclip` (Ghost, video 62-72 s, region 780,0,1000,1440) the saved colours plan 10 holds where a fresh learn plans 11 (saved trail tol 23, fresh 40): a lead for 4.1.
+
 | # | Change | Where | Done when |
 |---|---|---|---|
 | 3.1 | `detect --profile`: replay a clip with the saved layout and colours, the way a live run starts | `cli/src/detect.rs` | Mid-song dense clips replay without calibrating |

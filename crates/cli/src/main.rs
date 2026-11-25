@@ -85,6 +85,10 @@ enum Cmd {
         /// Also run the tracker and planner and report what would be pressed (no keys)
         #[arg(long)]
         plan: bool,
+        /// Start like a live run: this profile's saved layout and colours (default: the
+        /// config's profile), and with --plan its offset and the config's timing and style
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        profile: Option<String>,
     },
     /// Calibrate on the live screen, then play. Dry run (no keys) unless --live
     Run {
@@ -199,6 +203,7 @@ fn main() -> ExitCode {
             every,
             quiet,
             plan,
+            profile,
         } => {
             if let Some(d) = &debug_png
                 && let Err(e) = std::fs::create_dir_all(d)
@@ -213,6 +218,7 @@ fn main() -> ExitCode {
                 every,
                 quiet,
                 plan,
+                profile: profile.as_deref(),
             })
         }
         Cmd::Run {
