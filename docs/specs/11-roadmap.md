@@ -42,5 +42,7 @@ Status (2026-11-23, branch `v0.2`, draft PR #12): built and reviewed: player mod
 
 Next (2026-11-24): before PR #12 merges, work through [13 Accuracy plan](13-accuracy-plan.md) phases 1-2 (blockers), then 3-6, re-record the test songs, then the Windows checks and checklist rows 10-11.
 
+Status (2026-11-25): accuracy plan phases 1-6 built and checked offline on the 2026-11-24 clips (status per phase in [13](13-accuracy-plan.md)). Next: re-record the six songs with the fixes (overlay on and off, `[debug] flight_recorder = true`), compare with the table in 13, then the Windows checks and checklist rows 10-11.
+
 ## v0.3.0 and later (unordered)
 AUR publish automation; libei input fallback; DMA-BUF capture if measurements need it; Hallmark lint hook; landing page.
