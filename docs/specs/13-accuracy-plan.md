@@ -73,6 +73,8 @@ Status (2026-11-25), 4.1 and 4.2: `detect --plan` now runs the real scheduler on
 | 4.5 | (built 2026-11-25) Per-lane / per-pattern corrections only after ~20 good samples each | `core/src/adapt.rs` | Early-song corrections stay at 0 |
 
 ### Phase 5: OCR you can trust
+Status (2026-11-25): 5.1-5.3 and 5.5 built (see spec 03, results by OCR, update 2026-11-25). The game font's 7 often reads as 2 and a lost minus is common, so the live panel has the last word on accuracy and Mean MS. The live panel shows a full accuracy as `100%` too: the glyph reader and the OCR teacher now take that form.
+
 | # | Change | Where | Done when |
 |---|---|---|---|
 | 5.1 | Digit look-alike map in number fields (S/5, O/C/0, Y/4, I/l/1, B/8) and minus sign recovery from the panel sign rule | `runner/src/ocrteach.rs` | The six results screens read their counts and score |

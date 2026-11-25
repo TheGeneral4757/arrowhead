@@ -90,6 +90,8 @@ pub struct StatsRead {
 pub struct ResultsRead {
     pub counts: Counts,
     pub total_notes: Option<u32>,
+    /// Final score (the OCR reader checks it against the counts, spec 13 5.3).
+    pub score: Option<u32>,
     pub accuracy: Option<f32>,
     pub mean_ms: Option<f32>,
     pub combo: Option<u32>,
@@ -181,9 +183,13 @@ pub fn parse_ms(s: &str) -> Option<f32> {
     decimal(s.strip_suffix("ms")?)
 }
 
-/// "84.48%", 0..=100.
+/// "84.48%", 0..=100; a full accuracy is shown as "100%".
 pub fn parse_pct(s: &str) -> Option<f32> {
-    decimal(s.strip_suffix('%')?).filter(|v| (0.0..=100.0).contains(v))
+    let v = s.strip_suffix('%')?;
+    if v == "100" {
+        return Some(100.0);
+    }
+    decimal(v).filter(|v| (0.0..=100.0).contains(v))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

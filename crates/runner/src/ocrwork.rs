@@ -34,8 +34,14 @@ pub enum Job {
     },
     /// Read the song title line.
     Title(OwnedFrame),
-    /// Read the results screen ("Stats from Last Song") on a full frame.
-    Results(OwnedFrame),
+    /// Read the results screen ("Stats from Last Song") on a full frame. Passes add up over
+    /// the frames of one screen (`fresh` starts a new one) and are voted on together; `hint`
+    /// is the live HUD's last counts.
+    Results {
+        frame: OwnedFrame,
+        fresh: bool,
+        hint: Option<Counts>,
+    },
     /// Find the score regions in the bottom corners (`score_corner` crops, `[left, right]`).
     FindScores {
         corners: [Option<OwnedFrame>; 2],
@@ -94,8 +100,9 @@ impl Worker {
                     Ok(_) => return,
                     Err(e) => return drop(done_tx.send(Done::Failed(e))),
                 };
+                let mut res = ResultsState::default();
                 for job in job_rx {
-                    if done_tx.send(run(&ocr, job)).is_err() {
+                    if done_tx.send(run(&ocr, &mut res, job)).is_err() {
                         return;
                     }
                 }
@@ -144,7 +151,17 @@ impl Worker {
     }
 }
 
-fn run(ocr: &Ocr, job: Job) -> Done {
+/// The results screen's passes so far, and where its panel is.
+#[derive(Default)]
+struct ResultsState {
+    passes: Vec<Vec<(String, Rect)>>,
+    area: Option<Rect>,
+}
+
+/// Passes kept for one results screen (about 5 frames x 3 variants).
+const MAX_RESULT_PASSES: usize = 16;
+
+fn run(ocr: &Ocr, res: &mut ResultsState, job: Job) -> Done {
     match job {
         Job::Locate { frame, column } => {
             let mut lines = ocr.lines(&frame.view(), Variant::Plain2x);
@@ -183,25 +200,33 @@ fn run(ocr: &Ocr, job: Job) -> Done {
                 rect,
             }
         }
-        Job::Results(f) => {
-            // a pass costs a second on a full frame: stop at the first that is enough, then
-            // read the counts column again on its own (its digits are lost in the full pass)
-            let mut passes = vec![];
-            for &v in &VARIANTS {
-                passes.push(ocr.lines(&f.view(), v));
-                if let Some(r) = ocrteach::results(&passes) {
+        Job::Results { frame, fresh, hint } => {
+            if fresh {
+                *res = ResultsState::default();
+            }
+            // one full-frame pass finds the panel; then every variant reads just the panel
+            if res.area.is_none() {
+                let lines = ocr.lines(&frame.view(), Variant::Plain2x);
+                res.area = ocrteach::results_area(&lines).and_then(|r| frame.region.intersect(&r));
+                res.passes.push(lines);
+                if let Some(r) = ocrteach::results(&res.passes, hint) {
                     return Done::Results(Some(r));
                 }
             }
-            let panel = passes
-                .iter()
-                .find_map(|p| ocrteach::results_panel(p))
-                .and_then(|r| f.region.intersect(&r));
-            if let Some(c) = panel {
-                let col = f.view().crop(c);
-                passes.extend(VARIANTS.iter().map(|&v| ocr.lines(&col.view(), v)));
+            let Some(area) = res.area else {
+                return Done::Results(None);
+            };
+            let crop = frame.view().crop(area);
+            for &v in &VARIANTS {
+                if res.passes.len() >= MAX_RESULT_PASSES {
+                    res.passes.remove(1);
+                }
+                res.passes.push(ocr.lines(&crop.view(), v));
+                if let Some(r) = ocrteach::results(&res.passes, hint) {
+                    return Done::Results(Some(r));
+                }
             }
-            Done::Results(ocrteach::results(&passes))
+            Done::Results(None)
         }
         Job::FindScores { corners, stream } => {
             let mut i = 0;
@@ -366,10 +391,22 @@ mod tests {
         let frame = load_png(std::path::Path::new(&p)).unwrap();
         let mut w = Worker::start("default".into()).unwrap();
         assert!(matches!(wait(&mut w), Done::Ready));
-        assert!(w.offer(Job::Results(frame)));
-        let Done::Results(r) = wait(&mut w) else {
-            panic!()
-        };
+        // as the HUD thread does: a few tries on the same screen
+        let mut r = None;
+        for i in 0..5 {
+            assert!(w.offer(Job::Results {
+                frame: frame.clone(),
+                fresh: i == 0,
+                hint: None,
+            }));
+            let Done::Results(got) = wait(&mut w) else {
+                panic!()
+            };
+            if got.is_some() {
+                r = got;
+                break;
+            }
+        }
         eprintln!("results {r:?}");
         assert!(r.is_some());
     }

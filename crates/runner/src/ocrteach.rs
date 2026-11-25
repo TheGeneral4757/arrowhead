@@ -90,8 +90,19 @@ fn uint(lines: &Lines, label: &str) -> Option<u32> {
     digits(after(lines, label)?.0)?.parse().ok()
 }
 
-/// `nn.nn` with the dot put back where the format says it goes (OCR drops it).
+/// A 2-decimal value: as read when it has a dot and two decimals, `100` as 100 (a full
+/// accuracy is shown without decimals), else with the dot put back where the format says it
+/// goes (OCR drops it).
 fn two_dp(digits: &str) -> Option<f32> {
+    if let Some((_, f)) = digits.split_once('.')
+        && f.len() == 2
+        && f.chars().all(|c| c.is_ascii_digit())
+    {
+        return digits.parse().ok();
+    }
+    if digits.trim_start_matches('-') == "100" {
+        return Some(100.0);
+    }
     let neg = digits.starts_with('-');
     let d: String = digits.chars().filter(char::is_ascii_digit).collect();
     if d.len() < 3 || d.len() > 7 {
@@ -165,34 +176,131 @@ fn mode<T: PartialEq + Copy>(vals: impl Iterator<Item = Option<T>>) -> Option<T>
         .map(|e| e.0)
 }
 
-/// The results screen ("Stats from Last Song") from OCR passes over a full frame and over the
-/// counts column. `None` unless one reading of the five judgment counts and Total Notes is
-/// clearly the best and adds up (Sick + Good + Ok + Bad + Miss = Total Notes). Accuracy
-/// outside 0..=100 and a combo above Total Notes are dropped.
-pub fn results(passes: &[Vec<(String, Rect)>]) -> Option<ResultsRead> {
-    let row = |f: fn(&Lines) -> Option<u32>| tally(passes.iter().map(|p| f(p)));
+/// Final score on the results screen: 350 Sick + 200 Good + 100 Ok + 50 Bad - 30 Miss (exact on
+/// all six screens of 2026-11-24, spec 13 5.3).
+pub fn results_score(c: [u32; 5]) -> i64 {
+    350 * i64::from(c[0]) + 200 * i64::from(c[1]) + 100 * i64::from(c[2]) + 50 * i64::from(c[3])
+        - 30 * i64::from(c[4])
+}
+
+/// Equal, or the same length with one digit different (one OCR misread).
+fn near(read: u32, want: i64) -> bool {
+    let (a, b) = (read.to_string(), want.to_string());
+    a.len() == b.len() && a.bytes().zip(b.bytes()).filter(|(x, y)| x != y).count() <= 1
+}
+
+/// The big number under "FINAL SCORE" (the nearest digit line below the label, within three
+/// label heights), or the second word of the Total Notes line (OCR runs them together).
+fn final_score(lines: &Lines) -> Option<u32> {
+    let num = |t: &str| -> Option<u32> {
+        let d = digits(t.trim())?;
+        (d.len() >= 3 && d.chars().all(|c| c.is_ascii_digit()))
+            .then(|| d.parse().ok())
+            .flatten()
+    };
+    if let Some((_, lr)) = after(lines, "FINAL SCORE") {
+        let below = lines
+            .iter()
+            .filter(|(_, r)| r.y > lr.y && r.y < lr.y + 4 * lr.h as i32 && (r.x - lr.x).abs() < 80)
+            .min_by_key(|(_, r)| r.y)
+            .and_then(|(t, _)| num(t));
+        if below.is_some() {
+            return below;
+        }
+    }
+    let rest = after(lines, "TOTAL NOTES")?.0;
+    num(rest
+        .trim_start_matches([':', ';', ' ', '.', '?', '\'', '!'])
+        .split_whitespace()
+        .nth(1)?)
+}
+
+/// The most read size, negative if any pass read it with a minus: OCR drops a minus sign far
+/// more often than it makes one up.
+fn signed_mode(vals: impl Iterator<Item = f32>) -> Option<f32> {
+    let v: Vec<f32> = vals.collect();
+    let size = mode(v.iter().map(|x| Some(x.abs())))?;
+    Some(if v.iter().any(|&x| x < 0.0 && x.abs() == size) {
+        -size
+    } else {
+        size
+    })
+}
+
+/// Stands for "not read" in a row of candidates.
+const UNREAD: u32 = u32::MAX;
+
+/// The results screen ("Stats from Last Song") from OCR passes (any frames, any crops). The
+/// five counts, Total Notes and the final score are voted on together: a reading is kept only
+/// when its equations hold (Total = the sum, score = `results_score`), with the most passes
+/// behind it and no tie. One count may be unread or wrong when Total and the score are both
+/// read: it is solved from Total and checked against the score. Total or score may be one
+/// digit off (they are then corrected) when the other equation, or `hint` (the live HUD's
+/// final counts), backs the counts. Accuracy outside 0..=100 and a combo above Total Notes are
+/// dropped.
+pub fn results(passes: &[Vec<(String, Rect)>], hint: Option<Counts>) -> Option<ResultsRead> {
+    // A count may be taken as unread (the one solved from Total); Total and the score only
+    // when no pass read them, so a reading that contradicts the counts is never set aside.
+    let row = |f: &dyn Fn(&Lines) -> Option<u32>, skippable: bool| {
+        let mut t = tally(passes.iter().map(|p| f(p)));
+        if skippable || t.is_empty() {
+            t.push((UNREAD, 0));
+        }
+        t
+    };
     let rows = [
-        row(|l| first_uint(l, "SICK")),
-        row(|l| first_uint(l, "GOOD")),
-        row(|l| first_uint(l, "OK").or_else(|| first_uint(l, "OR"))),
-        row(|l| first_uint(l, "BAD")),
-        row(|l| first_uint(l, "MISS")),
-        row(|l| first_uint(l, "TOTAL NOTES")),
+        row(&|l| first_uint(l, "SICK"), true),
+        row(&|l| first_uint(l, "GOOD"), true),
+        row(
+            &|l| first_uint(l, "OK").or_else(|| first_uint(l, "OR")),
+            true,
+        ),
+        row(&|l| first_uint(l, "BAD"), true),
+        row(&|l| first_uint(l, "MISS"), true),
+        row(&|l| first_uint(l, "TOTAL NOTES"), false),
+        row(&final_score, false),
     ];
-    let v = best_consistent(&rows, |v| v[5] > 0 && v[..5].iter().sum::<u32>() == v[5])?;
-    let total = v[5];
+    let hint = hint.and_then(|h| Some([h.sick?, h.good?, h.ok?, h.bad?, h.miss?]));
+    let solve = |v: &[u32]| -> Option<([u32; 5], u32, i64)> {
+        let known = |x: u32| (x != UNREAD).then_some(x);
+        let (t, p) = (known(v[5]), known(v[6]));
+        let unread: Vec<usize> = (0..5).filter(|&i| v[i] == UNREAD).collect();
+        let mut c = [v[0], v[1], v[2], v[3], v[4]];
+        match unread[..] {
+            [k] => {
+                let rest: u32 = (0..5).filter(|&i| i != k).map(|i| c[i]).sum();
+                c[k] = t?.checked_sub(rest)?;
+                let score = results_score(c);
+                near(p?, score).then_some((c, t?, score))
+            }
+            [] => {
+                let (sum, score) = (c.iter().sum::<u32>(), results_score(c));
+                let ok_t = t.is_none_or(|t| near(t, i64::from(sum)));
+                let ok_p = p.is_none_or(|p| near(p, score));
+                let backed = t == Some(sum)
+                    || p.is_some_and(|p| i64::from(p) == score)
+                    || (t.is_some() && p.is_some())
+                    || hint == Some(c);
+                (sum > 0 && ok_t && ok_p && backed).then_some((c, sum, score))
+            }
+            _ => None,
+        }
+    };
+    let v = best_consistent(&rows, |v| solve(v).is_some())?;
+    let (c, total, score) = solve(&v)?;
     let st: Vec<StatsRead> = passes.iter().map(|p| stats(p)).collect();
     Some(ResultsRead {
         counts: Counts {
-            sick: Some(v[0]),
-            good: Some(v[1]),
-            ok: Some(v[2]),
-            bad: Some(v[3]),
-            miss: Some(v[4]),
+            sick: Some(c[0]),
+            good: Some(c[1]),
+            ok: Some(c[2]),
+            bad: Some(c[3]),
+            miss: Some(c[4]),
         },
         total_notes: Some(total),
+        score: u32::try_from(score).ok(),
         accuracy: mode(st.iter().map(|s| s.accuracy)),
-        mean_ms: mode(st.iter().map(|s| s.mean_ms)),
+        mean_ms: signed_mode(st.iter().filter_map(|s| s.mean_ms)),
         combo: mode(
             passes
                 .iter()
@@ -206,16 +314,32 @@ pub fn results(passes: &[Vec<(String, Rect)>]) -> Option<ResultsRead> {
     })
 }
 
-/// Where the counts column is, from the lines of one pass: crop it and read it again, the
-/// thin digits are lost in a whole-frame pass.
-pub fn results_panel(lines: &Lines) -> Option<Rect> {
-    let rs: Vec<Rect> = ["SICK", "GOOD", "BAD", "MISS", "TOTAL NOTES"]
-        .iter()
-        .filter_map(|l| after(lines, l).map(|(_, r)| r))
-        .collect();
-    (rs.len() >= 3)
-        .then(|| union(&rs).map(|r| padded(r, 30)))
-        .flatten()
+/// The whole results panel (both columns and the score under its label), from the lines of
+/// one full-frame pass: later passes read only this crop, which is faster and sharper.
+pub fn results_area(lines: &Lines) -> Option<Rect> {
+    let rs: Vec<Rect> = [
+        "SICK",
+        "GOOD",
+        "BAD",
+        "MISS",
+        "TOTAL NOTES",
+        "ACCURACY",
+        "MEAN MS",
+        "FINAL SCORE",
+    ]
+    .iter()
+    .filter_map(|l| after(lines, l).map(|(_, r)| r))
+    .collect();
+    if rs.len() < 3 {
+        return None;
+    }
+    let mut u = union(&rs)?;
+    // the score digits sit under their label, about three label heights tall
+    if let Some((_, lr)) = after(lines, "FINAL SCORE") {
+        let bottom = (lr.y + 4 * lr.h as i32).max(u.y + u.h as i32);
+        u.h = (bottom - u.y) as u32;
+    }
+    Some(padded(u, 40))
 }
 
 /// The value every pass read alike (for values no arithmetic can check).
@@ -775,6 +899,10 @@ mod tests {
         ]
     }
 
+    fn results(p: &[Vec<(String, Rect)>]) -> Option<ResultsRead> {
+        super::results(p, None)
+    }
+
     fn lines(rows: &[&str]) -> Vec<(String, Rect)> {
         rows.iter()
             .enumerate()
@@ -784,8 +912,9 @@ mod tests {
 
     #[test]
     fn reads_the_results_panel() {
-        // real ocrs output on the results screen (plain 2x)
-        let r = results(&[lines(&[
+        // real ocrs output on results4 (plain 2x): Miss 61 read as 6 and Total 688 as 633 add
+        // up by chance, but the score for those counts would be 137170, not 135320: rejected
+        let mut rows = vec![
             "STATS FROM LAST SONG",
             "SICk: 243",
             "GOOD: 180",
@@ -799,12 +928,17 @@ mod tests {
             "HIGHEST COMBO: 47",
             "FINAL SCORE",
             "135320",
-        ])])
-        .unwrap();
+        ];
+        assert_eq!(results(&[lines(&rows)]), None);
+        // the true Miss and Total: the score read one digit off (135320 for 135520) is fixed
+        rows[5] = "MISS: 61";
+        rows[6] = "TOTAL NOTES: 688";
+        let r = results(&[lines(&rows)]).unwrap();
         assert_eq!(r.counts.sick, Some(243));
         assert_eq!(r.counts.ok, Some(122));
-        assert_eq!(r.counts.miss, Some(6));
-        assert_eq!(r.total_notes, Some(633));
+        assert_eq!(r.counts.miss, Some(61));
+        assert_eq!(r.total_notes, Some(688));
+        assert_eq!(r.score, Some(135_520));
         assert_eq!(r.accuracy, Some(84.93));
         assert_eq!(r.mean_ms, Some(48.4));
         assert_eq!((r.combo, r.highest_combo), (Some(2), Some(47)));
@@ -888,7 +1022,77 @@ mod tests {
         ])])
         .unwrap();
         assert_eq!((r.counts.bad, r.counts.miss), (Some(56), Some(56)));
-        assert!(results_panel(&full).is_some());
+        assert!(results_area(&full).is_some());
+    }
+
+    #[test]
+    fn results_checked_and_fixed_by_the_score() {
+        // Deathmatch (2026-11-24): score read 240804 for 240800, Total exact: fixed
+        let mut rows = vec![
+            "SICK: 688",
+            "GOOD: 0",
+            "OK: 0",
+            "BAD: 0",
+            "MISS: 0",
+            "TOTAL NOTES: 688",
+            "ACCURACY: 100%",
+            "FINAL SCORE",
+            "240804",
+        ];
+        let r = results(&[lines(&rows)]).unwrap();
+        assert_eq!((r.score, r.accuracy), (Some(240_800), Some(100.0)));
+        // Total read 788, score exact: fixed
+        rows[5] = "TOTAL NOTES: 788";
+        rows[8] = "240800";
+        assert_eq!(results(&[lines(&rows)]).unwrap().total_notes, Some(688));
+        // both one digit off: the two weak checks together are enough
+        rows[8] = "240804";
+        assert_eq!(results(&[lines(&rows)]).unwrap().total_notes, Some(688));
+        // Gospel: Ok unreadable, solved from Total and checked by the score
+        let r = results(&[lines(&[
+            "SICK: 688",
+            "GOOD: 0",
+            "OK: ?",
+            "BAD: 2",
+            "MISS: 21",
+            "TOTAL NOTES: 727",
+            "FINAL SCORE",
+            "241870",
+        ])])
+        .unwrap();
+        assert_eq!(r.counts.ok, Some(16));
+        // Pico (real OCR lines): no Total line and the score read 242310 for 247310; only
+        // the live HUD's final counts can back it
+        let pico = lines(&[
+            "SIck. 709",
+            "GOOD: O",
+            "OK: 0",
+            "SAD: O",
+            "1I55 28",
+            "ACCURACY: 96.20% ",
+            "MEAN MS: -4.21 MS",
+            "SINAL SCORE",
+            "242310",
+        ]);
+        assert_eq!(results(std::slice::from_ref(&pico)), None);
+        let live = Counts {
+            sick: Some(709),
+            good: Some(0),
+            ok: Some(0),
+            bad: Some(0),
+            miss: Some(28),
+        };
+        let r = super::results(&[pico], Some(live)).unwrap();
+        assert_eq!((r.total_notes, r.score), (Some(737), Some(247_310)));
+        assert_eq!((r.accuracy, r.mean_ms), (Some(96.2), Some(-4.21)));
+        assert_eq!(results_score([4696, 15, 48, 9, 193]), 1_646_060);
+    }
+
+    #[test]
+    fn mean_keeps_a_minus_any_pass_saw() {
+        assert_eq!(signed_mode([3.39, -3.39, 3.39].into_iter()), Some(-3.39));
+        assert_eq!(signed_mode([5.39, 5.39].into_iter()), Some(5.39));
+        assert_eq!(signed_mode(std::iter::empty()), None);
     }
 
     #[test]

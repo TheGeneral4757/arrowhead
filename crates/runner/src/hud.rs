@@ -171,7 +171,7 @@ fn accept_score(slot: &mut Option<(i32, Instant)>, v: i32) -> bool {
 }
 
 /// How long after a song the results screen is waited for, and how often it is read.
-const RESULTS_WAIT: Duration = Duration::from_secs(10);
+const RESULTS_WAIT: Duration = Duration::from_secs(20);
 const RESULTS_EVERY: Duration = Duration::from_secs(1);
 
 /// A song that is over but whose history row waits for the results screen (spec 03).
@@ -183,6 +183,8 @@ struct PendingResults {
     bias_ms: f32,
     ended: Instant,
     last_try: Instant,
+    /// Frames of the results screen offered to OCR so far (their passes are voted together).
+    tries: u32,
 }
 
 /// A face knows every digit: OCR teaching can stop.
@@ -455,6 +457,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                         bias_ms: rb.bias_ms,
                         ended: Instant::now(),
                         last_try: Instant::now() - RESULTS_EVERY,
+                        tries: 0,
                     };
                     if ocr.is_some() {
                         // the row waits for the results screen's exact numbers
@@ -671,7 +674,13 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                     let mut taught = 0;
                     if let Some(r) = rd.locs.stats {
                         let rows: [Option<String>; 7] = [
-                            st.accuracy.map(|v| format!("{v:.2}%")),
+                            st.accuracy.map(|v| {
+                                if v >= 100.0 {
+                                    "100%".to_string()
+                                } else {
+                                    format!("{v:.2}%")
+                                }
+                            }),
                             st.highest_combo.map(|v| v.to_string()),
                             st.combo.map(|v| v.to_string()),
                             st.hits.map(|v| v.to_string()),
@@ -803,7 +812,13 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
             && let Some(f) = holding(&frames, full)
         {
             p.last_try = Instant::now();
-            w.offer(crate::ocrwork::Job::Results(f.clone()));
+            if w.offer(crate::ocrwork::Job::Results {
+                frame: f.clone(),
+                fresh: p.tries == 0,
+                hint: p.song.counts,
+            }) {
+                p.tries += 1;
+            }
         }
         if let Some(w) = ocr.as_mut()
             && !w.busy()
@@ -1252,6 +1267,8 @@ fn finish_song(
     results: Option<ResultsRead>,
     tx: &Tx,
 ) -> Option<f32> {
+    let live = p.song.stats;
+    let results = results.map(|r| checked_by_live(r, live, s.stats_mean_sign, tx));
     if let Some(r) = &results {
         p.song.counts = Some(r.counts);
         if let Some(a) = r.accuracy {
@@ -1277,6 +1294,34 @@ fn finish_song(
     );
     record_song(book, book_path, s, style_id, &p.song, target, tx);
     save_bias(s, target?, tx)
+}
+
+/// The results screen against the live stats panel's last reading (spec 13, 5.1): at the end
+/// of a song both show the same accuracy, and Mean MS with opposite signs (G14). OCR misreads
+/// the results font (a 7 as a 2, a lost minus), the glyph reader was checked all song: where
+/// they differ, the live value is kept; a lost minus is put back.
+fn checked_by_live(mut r: ResultsRead, live: Option<StatsRead>, sign: f32, tx: &Tx) -> ResultsRead {
+    let Some(live) = live else { return r };
+    if let Some(a) = live.accuracy
+        && r.accuracy.is_none_or(|x| (x - a).abs() > 0.011)
+    {
+        if let Some(x) = r.accuracy {
+            log(
+                tx,
+                Level::Info,
+                format!(
+                    "results: accuracy read {x:.2}%, the live panel showed {a:.2}%: using the panel"
+                ),
+            );
+        }
+        r.accuracy = Some(a);
+    }
+    if let Some(m) = live.mean_ms.map(|m| m * sign)
+        && r.mean_ms.is_none_or(|x| (x - m).abs() > 0.011)
+    {
+        r.mean_ms = Some(m);
+    }
+    r
 }
 
 /// Matched readbacks the offset needs from a song, and the most their spread (median absolute
@@ -1582,6 +1627,27 @@ mod tests {
         assert!((7.2 - v).abs() > tol); // a wrong-sign popup is not confirmed
         assert_eq!(one_hit_step(st(10, 5.0), st(12, 5.2), -1.0), None); // two hits: no check
         assert_eq!(one_hit_step(None, st(11, 5.2), -1.0), None);
+    }
+
+    #[test]
+    fn results_checked_by_the_live_panel() {
+        let (tx, _rx) = std::sync::mpsc::sync_channel(16);
+        // Gospel: OCR read 92.02% and +5.39 ms; the panel ended on 97.62% and +5.39 (G14)
+        let r = ResultsRead {
+            accuracy: Some(92.02),
+            mean_ms: Some(5.39),
+            ..ResultsRead::default()
+        };
+        let live = StatsRead {
+            accuracy: Some(97.62),
+            mean_ms: Some(5.39),
+            ..StatsRead::default()
+        };
+        let r = checked_by_live(r, Some(live), -1.0, &tx);
+        assert_eq!((r.accuracy, r.mean_ms), (Some(97.62), Some(-5.39)));
+        // nothing live: as read
+        let r = checked_by_live(ResultsRead::default(), None, -1.0, &tx);
+        assert_eq!(r.accuracy, None);
     }
 
     #[test]

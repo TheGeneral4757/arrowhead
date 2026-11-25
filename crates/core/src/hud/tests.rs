@@ -223,6 +223,7 @@ fn parsers() {
     assert_eq!(parse_ms("1.2ms"), None);
     assert_eq!(parse_pct("84.48%"), Some(84.48));
     assert_eq!(parse_pct("104.00%"), None);
+    assert_eq!(parse_pct("100%"), Some(100.0));
     assert_eq!(parse_int("-395"), Some(-395));
     assert_eq!(parse_int("39-5"), None);
     assert_eq!(parse_uint(""), None);
