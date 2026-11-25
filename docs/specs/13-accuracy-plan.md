@@ -68,9 +68,9 @@ Status (2026-11-25), 4.1 and 4.2: `detect --plan` now runs the real scheduler on
 |---|---|---|---|
 | 4.1 | Hold heads skipped live (Ghost 65.5-68.5 s): find the live-only cause with 3.1/3.2 (suspects: saved colours vs fresh, Max style planning, readback corrections, scheduler) and fix it | `core/src/plan.rs`, `track.rs`, `sched.rs` | The Ghost hold section replays with every head pressed and held |
 | 4.2 | Stale frames: skip a track observation when the frame repeats the last one (no head moved), so an old position never gets a new pts | `core/src/track.rs` | Synthetic test with 15% duplicated frames keeps crossing error < 1 ms; real mean lateness drops |
-| 4.3 | Readback gating: adapt only from readings where the popup agrees with the panel's Mean MS change on a +1 Hits step | `runner/src/hud.rs`, `ocrteach.rs` | Wrong-sign or misread popups never reach `Bias` |
-| 4.4 | Song rate: parse "(N.NNx)" from the title; divide game ms by the rate before readback and adaptation; store offsets in real ms | `runner/src/ocrteach.rs`, `hud.rs`, spec 04 | Ghost at 2.00x adapts to about the same real offset as 1.00x songs |
-| 4.5 | Per-lane / per-pattern corrections only after ~20 good samples each | `core/src/adapt.rs` | Early-song corrections stay at 0 |
+| 4.3 | (built 2026-11-25) Readback gating: adapt only from readings where the popup agrees with the panel's Mean MS change on a +1 Hits step | `runner/src/hud.rs`, `ocrteach.rs` | Wrong-sign or misread popups never reach `Bias` |
+| 4.4 | (built 2026-11-25) Song rate: parse "(N.NNx)" from the title; divide game ms by the rate before readback and adaptation; store offsets in real ms | `runner/src/ocrteach.rs`, `hud.rs`, spec 04 | Ghost at 2.00x adapts to about the same real offset as 1.00x songs |
+| 4.5 | (built 2026-11-25) Per-lane / per-pattern corrections only after ~20 good samples each | `core/src/adapt.rs` | Early-song corrections stay at 0 |
 
 ### Phase 5: OCR you can trust
 | # | Change | Where | Done when |

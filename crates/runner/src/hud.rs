@@ -139,6 +139,14 @@ struct Song {
     unconfirmed: u32,
     /// The last one-hit step of the panel: (popup value it implies, tolerance, pts).
     step: Option<(f32, f32, Nanos)>,
+    /// Song rate from the title (G15): the game's ms divided by it are real ms. `None` = 1.00x.
+    rate: Option<f32>,
+}
+
+impl Song {
+    fn rate(&self) -> f32 {
+        self.rate.unwrap_or(1.0)
+    }
 }
 
 /// The popup value the stats panel implies when Hits went up by exactly one between `prev` and
@@ -615,6 +623,7 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                 }
                 Done::Title(Some(t)) => {
                     let (name, difficulty) = crate::ocrteach::title(&t);
+                    song.rate = crate::ocrteach::rate(&t);
                     let key = SongBook::key(&t);
                     let start =
                         book.start_values(&key, &style_id, f64::from(s.target.unwrap_or(100.0)));
@@ -988,8 +997,13 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                         && song.step.take().is_some_and(|(v, tol, t)| {
                             pts.ms_since(t) <= STEP_KEEP_MS && (raw - v).abs() <= tol
                         });
-                    let read =
-                        rb.on_read_adapt(pts, raw, None, presses.make_contiguous(), confirmed);
+                    let read = rb.on_read_adapt(
+                        pts,
+                        raw / song.rate(),
+                        None,
+                        presses.make_contiguous(),
+                        confirmed,
+                    );
                     if !confirmed {
                         song.unconfirmed += u32::from(read.is_some());
                     } else if let Some(m) = read {
@@ -1257,7 +1271,9 @@ fn finish_song(
     let target = offset_target(
         &p.song,
         p.bias_ms,
-        results.and_then(|r| r.mean_ms).map(|m| m * s.readback_sign),
+        results
+            .and_then(|r| r.mean_ms)
+            .map(|m| m * s.readback_sign / p.song.rate()),
     );
     record_song(book, book_path, s, style_id, &p.song, target, tx);
     save_bias(s, target?, tx)

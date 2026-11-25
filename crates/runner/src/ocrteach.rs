@@ -449,6 +449,27 @@ pub fn title(t: &str) -> (String, String) {
     }
 }
 
+/// Song rate from a title's "(2.00x)" (OCR often drops the dot: "(200X)"). The game's ms are
+/// in song time at that rate (G15). `None`: no rate shown (1.00x).
+pub fn rate(t: &str) -> Option<f32> {
+    t.rsplit('(').find_map(|seg| {
+        let inner = seg.split(')').next()?.trim();
+        let num = inner.strip_suffix(['x', 'X'])?.trim().replace(',', ".");
+        let v: f32 = if num.contains('.') {
+            num.parse().ok()?
+        } else {
+            let d: f32 = num.parse().ok()?;
+            match num.len() {
+                3 => d / 100.0,
+                2 => d / 10.0,
+                1 => d,
+                _ => return None,
+            }
+        };
+        (0.25..=4.0).contains(&v).then_some(v)
+    })
+}
+
 /// The ms of the hit that took Hits from `prev_hits` to `hits = prev_hits + 1`, from the
 /// stats panel's Mean MS before and after (shown to 2 decimals), and how far off it can be
 /// from that rounding. `None` unless exactly one hit was added.
@@ -669,6 +690,16 @@ pub fn judgment_by_colour(rgb: [f32; 3], labels: &[[f32; 3]; 5]) -> Option<usize
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn song_rate_from_title() {
+        assert_eq!(rate("VS CAMELLIA GHOST (VIP) (MANIAC) (200X)"), Some(2.0));
+        assert_eq!(rate("Ghost (VIP) (Maniac) (2.00x)"), Some(2.0));
+        assert_eq!(rate("Song (1.5x)"), Some(1.5));
+        assert_eq!(rate("Song (Hard)"), None);
+        assert_eq!(rate("Song (VIP)"), None);
+        assert_eq!(rate("Song (900x)"), None);
+    }
 
     #[test]
     fn score_helpers() {

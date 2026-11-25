@@ -21,6 +21,8 @@ pub const CHORD_MS: f64 = 5.0;
 pub const JACK_MS: f64 = 150.0;
 /// Shrinkage: a mean over `n` samples counts `n / (n + SHRINK_N)`.
 const SHRINK_N: f64 = 10.0;
+/// A lane or class gets no correction before this many samples of its own (spec 13, 4.5).
+pub const MIN_SAMPLES: u32 = 20;
 
 #[derive(Clone, Copy, Debug, Default)]
 struct Acc {
@@ -35,7 +37,7 @@ impl Acc {
     }
     /// Shrunk mean relative to `overall`.
     fn rel(&self, overall: f64) -> f64 {
-        if self.n == 0 {
+        if self.n < MIN_SAMPLES {
             return 0.0;
         }
         let n = self.n as f64;
@@ -311,11 +313,16 @@ mod tests {
         assert!((c[1] - 2.5 * 100.0 / 110.0).abs() < 1e-9);
         // the corrections cancel up to shrinkage
         assert!(c.iter().sum::<f64>().abs() < 0.5);
-        // few samples barely move it
+        // under MIN_SAMPLES of its own a lane or class is not corrected at all
         let mut f = Bias::new();
+        for _ in 0..MIN_SAMPLES - 1 {
+            f.add(0, Class::Jack, 20.0);
+            f.add(1, Class::Single, 0.0);
+        }
+        assert_eq!(f.lane_ms(0), 0.0);
+        assert_eq!(f.class_ms(Class::Jack), 0.0);
         f.add(0, Class::Jack, 20.0);
-        f.add(1, Class::Single, 0.0);
-        assert!(f.lane_ms(0).abs() < 1.0);
+        assert!(f.lane_ms(0) < -5.0);
     }
 
     #[test]
