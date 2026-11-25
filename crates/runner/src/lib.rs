@@ -572,6 +572,13 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
         tx.clone(),
     )?;
 
+    // The key sink first: if it cannot be made, no worker below is left running.
+    let mut sink: Box<dyn KeySink> = if o.live {
+        live_sink(key_names(cfg.keys.set, &cfg.keys.custom))?
+    } else {
+        ctl.dry_run.store(true, Ordering::SeqCst);
+        Box::new(NullSink)
+    };
     // Focus guard (S3): fail open with a warning unless the config requires it.
     let focus = Arc::new(AtomicBool::new(true));
     let sched_stop = Arc::new(AtomicBool::new(false));
@@ -585,12 +592,6 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
         },
     );
 
-    let mut sink: Box<dyn KeySink> = if o.live {
-        live_sink(key_names(cfg.keys.set, &cfg.keys.custom))?
-    } else {
-        ctl.dry_run.store(true, Ordering::SeqCst);
-        Box::new(NullSink)
-    };
     log(
         &tx,
         Level::Info,
