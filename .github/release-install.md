@@ -1,6 +1,8 @@
 ### Install
 
-**Arch (AUR):** `yay -S arrowhead-bin` (or `paru -S arrowhead-bin`). Updates come from your package manager.
+**Any distro (AppImage, updates in-app):** download `arrowhead-@VERSION@-linux-x86_64.AppImage`, then `chmod +x arrowhead-@VERSION@-linux-x86_64.AppImage && ./arrowhead-@VERSION@-linux-x86_64.AppImage`. Needs `libfuse2` and glibc 2.39 or newer (Ubuntu 24.04, Fedora 40, Debian 13, Arch).
+
+**Arch (AUR, coming soon):** `yay -S arrowhead-bin` (or `paru -S arrowhead-bin`) once the package is published. Updates come from your package manager.
 
 **Any distro (tarball):**
 
@@ -13,7 +15,15 @@ tar xzf arrowhead-@VERSION@-linux-x86_64.tar.gz && cd arrowhead-@VERSION@-linux-
 
 **Windows 10/11:** download `arrowhead-@VERSION@-windows-x86_64.msi` (installer, updates in-app) or the `.zip` (portable) from the assets below.
 
-Linux needs webkit2gtk-4.1, libsoup3, gtk3, pipewire, xdg-desktop-portal (+ the KDE or Hyprland backend) and a writable `/dev/uinput`. See the [README](https://github.com/TheGeneral4757/arrowhead#install) for first-run setup. The `.sig` file is the in-app updater's signature.
+Linux needs pipewire and xdg-desktop-portal (+ the KDE or Hyprland backend); the tarball also needs webkit2gtk-4.1, libsoup3 and gtk3. The `.sig` file is the in-app updater's signature.
+
+### Setup after installing
+
+1. **Key output (Linux):** arrowhead types through `/dev/uinput`. If `test -w /dev/uinput` fails, add the udev rule from the [guide](https://github.com/TheGeneral4757/arrowhead/blob/main/docs/GUIDE.md#let-arrowhead-press-keys-devuinput) and log in again. Without it only dry runs work.
+2. **Game:** Funky Friday in Sober on a private server, 4-key mode. Note your four keybinds.
+3. **Setup page**, with the game on screen: Permissions, Screen (pick the whole monitor the game is on), Calibrate (start any song), Latency, Keys (match your keybinds).
+4. **Play:** Live, Start, then play songs. Dry run watches without pressing. F8 pause, F12 panic.
+
+Full walkthrough, every setting, how it works and troubleshooting: [user guide](https://github.com/TheGeneral4757/arrowhead/blob/main/docs/GUIDE.md).
 
 > Automating input in Roblox breaks its Terms of Use. Private servers only, at your own risk.
-

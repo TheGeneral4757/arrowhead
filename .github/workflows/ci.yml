@@ -65,3 +65,40 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo run -p arrowhead-cli -- --version
+
+  # The release's AppImage (release.yml runs only on a tag): build it here so a broken bundle
+  # shows up on the pull request, not on release day.
+  appimage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libgtk-3-dev libpipewire-0.3-dev clang libxkbcommon-dev libwayland-dev file librsvg2-dev
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+        working-directory: ui
+      - name: Build the AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          bash packaging/fetch-ocr-models.sh default target/ocr-models
+          cargo build --release -p arrowhead-overlay
+          cp target/release/arrowhead-overlay target/release/arrowhead-overlay-x86_64-unknown-linux-gnu
+          npm --prefix ui run tauri build -- --bundles appimage --config ../crates/app/tauri.appimage.conf.json
+      - name: Check its contents
+        run: |
+          f=$(realpath target/release/bundle/appimage/*.AppImage)
+          ls -la "$f"
+          cd "$(mktemp -d)" && "$f" --appimage-extract >/dev/null
+          test -x squashfs-root/usr/bin/arrowhead
+          test -x squashfs-root/usr/bin/arrowhead-overlay
+          test -f squashfs-root/usr/lib/arrowhead/models/text-detection.onnx
+          test -f squashfs-root/usr/lib/arrowhead/models/text-recognition.onnx
