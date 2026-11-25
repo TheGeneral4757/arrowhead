@@ -69,8 +69,7 @@ jobs:
   # The release's AppImage (release.yml runs only on a tag): build it here so a broken bundle
   # shows up on the pull request, not on release day.
   appimage:
-    # the release's Linux job runs here too: an AppImage needs the oldest glibc it should run on
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Linux build deps
