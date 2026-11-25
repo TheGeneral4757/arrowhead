@@ -143,7 +143,7 @@ A profile is matched at start by `(monitor, stream_size, scale)`; if none matche
 `hit_hist` (optional, v0.2) holds the song's hit errors for the History page: `counts[i]` covers `[from_ms + i * bin_ms, from_ms + (i + 1) * bin_ms)`. Rows without hit errors leave it out. The app reads the file newest first and skips lines it cannot parse.
 
 ## `songs.json`
-Per-song memory (`core::adapt::SongBook`), keyed by `SongBook::key(title)`: the OCR'd title lowercased, punctuation and runs of whitespace turned into single spaces. Written atomically after a play. Unknown fields are kept on save. A file that does not parse is renamed `songs.json.bad` and an empty book is used.
+Per-song memory (`core::adapt::SongBook`), keyed by `SongBook::key("name difficulty")` from the OCR'd title (`ocrteach::title`: no rate, no "By:"), lowercased, punctuation and runs of whitespace turned into single spaces, then `SongBook::resolve`: an existing key within two OCR slips is reused and other near ones merged into it (spec 13, 5.4). Offsets are real ms at any rate. Written atomically after a play. Unknown fields are kept on save. A file that does not parse is renamed `songs.json.bad` and an empty book is used.
 
 ```json
 {"version":1,"songs":{"hello world remix":{
