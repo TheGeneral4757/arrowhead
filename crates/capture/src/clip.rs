@@ -84,6 +84,17 @@ impl ClipWriter {
         Ok(())
     }
 
+    /// Writes one frame already zstd-compressed (packed BGRx of the clip's region).
+    pub fn push_compressed(&mut self, pts: Nanos, seq: u64, z: &[u8]) -> io::Result<()> {
+        self.index.push(self.pos);
+        self.out.write_all(&pts.0.to_le_bytes())?;
+        self.out.write_all(&seq.to_le_bytes())?;
+        self.out.write_all(&(z.len() as u32).to_le_bytes())?;
+        self.out.write_all(z)?;
+        self.pos += 20 + z.len() as u64;
+        Ok(())
+    }
+
     pub fn frames(&self) -> usize {
         self.index.len()
     }

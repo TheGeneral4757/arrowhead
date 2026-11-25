@@ -232,11 +232,13 @@ dependencies = [
 name = "arrowhead-runner"
 version = "0.1.0"
 dependencies = [
+ "arrowhead-capture",
  "arrowhead-core",
  "arrowhead-input",
  "arrowhead-ocr",
  "png",
  "serde",
+ "zstd",
 ]
 
 [[package]]

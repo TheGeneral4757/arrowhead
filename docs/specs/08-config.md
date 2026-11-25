@@ -82,6 +82,9 @@ check = true
 [log]
 level = "info"
 per_note = false
+
+[debug]
+flight_recorder = false      # keep the last 10 s of playfield frames + presses, dump on a miss (data/flight/)
 ```
 
 ## `profiles/<name>.toml`

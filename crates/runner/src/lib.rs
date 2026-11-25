@@ -23,6 +23,7 @@ use arrowhead_core::sched::{SchedEvent, Scheduler};
 use arrowhead_core::session::{Event as SEv, Session};
 use arrowhead_core::time::{Clock, RealClock};
 
+mod flight;
 mod hud;
 pub mod latency;
 mod ocrteach;
@@ -494,6 +495,29 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
             ));
     }
 
+    // Flight recorder (spec 13 3.2, off by default): last 10 s of frames and presses, dumped
+    // when the HUD sees a miss.
+    let (mut flight, flight_hud) = if cfg.debug.flight_recorder {
+        let i = src.info();
+        let (f, h) = flight::Flight::start(
+            flight::Stream {
+                width: i.width,
+                height: i.height,
+                refresh_hz: i.refresh_hz,
+                backend: i.backend.clone(),
+            },
+            tx.clone(),
+        )?;
+        log(
+            &tx,
+            Level::Info,
+            "flight recorder on: a miss saves the last 10 s to data/flight/",
+        );
+        (Some(f), Some(h))
+    } else {
+        (None, None)
+    };
+
     // HUD reader and readback (spec 03, 04) on their own thread; channels only.
     let (hud_tx, hud_rx) = mpsc::sync_channel::<hud::ToHud>(256);
     let (from_hud_tx, from_hud) = mpsc::channel::<hud::FromHud>();
@@ -525,6 +549,7 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
             ocr_model: cfg.ui.ocr_model.clone(),
             seat: cfg.game.seat,
             match_friend: cfg.match_friend.clone(),
+            flight: flight_hud,
         },
         hud_rx,
         from_hud_tx,
@@ -780,6 +805,9 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
         cmds.clear();
         let t = Instant::now();
         eng.on_frame(&f, now, &mut cmds);
+        if let Some(fl) = flight.as_mut() {
+            fl.frame(&f);
+        }
         if learning {
             if let Ok(c) = trail_rx.try_recv() {
                 eng.det.colours.trail = c.trail;
@@ -807,6 +835,14 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
                 release,
             } = c
             {
+                if let Some(fl) = &flight {
+                    fl.send(flight::Msg::Planned {
+                        id,
+                        lane,
+                        at,
+                        release,
+                    });
+                }
                 emit(
                     &tx,
                     EngineEvent::Planned {
@@ -834,6 +870,14 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
                     actual,
                 } => {
                     sum.presses += 1;
+                    if let Some(fl) = &flight {
+                        fl.send(flight::Msg::Sent {
+                            id,
+                            lane,
+                            planned,
+                            actual,
+                        });
+                    }
                     late_us.push((actual.ms_since(planned) * 1000.0) as f32);
                     let _ = hud_tx.try_send(hud::ToHud::Press {
                         sent: actual,

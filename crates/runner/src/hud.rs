@@ -80,6 +80,8 @@ pub struct HudSetup {
     /// `game.seat`: which side of the screen we play on (our score).
     pub seat: Seat,
     pub match_friend: MatchFriend,
+    /// Flight recorder (spec 13 3.2): told when the Misses counter rises.
+    pub flight: Option<std::sync::mpsc::SyncSender<crate::flight::Msg>>,
 }
 
 /// Every 8th frame: about 20 Hz at 165 Hz.
@@ -242,7 +244,7 @@ fn hist(e: &[f32]) -> Option<HitHist> {
 }
 
 /// RFC 3339 UTC, seconds (no date crate for one timestamp).
-fn rfc3339(t: SystemTime) -> String {
+pub(crate) fn rfc3339(t: SystemTime) -> String {
     let s = t
         .duration_since(SystemTime::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs()) as i64;
@@ -867,6 +869,14 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                         format!("HUD: learned the ms readout from the first hit ({m:.2} ms)"),
                     );
                 }
+            }
+            // Misses rose by a few (a bigger jump is a misread): the flight recorder dumps.
+            if let Some(fl) = &s.flight
+                && let (Some(from), Some(to)) = (prev.0.and_then(|p| p.misses), st.misses)
+                && to > from
+                && to - from <= 4
+            {
+                let _ = fl.try_send(crate::flight::Msg::Missed { from, to });
             }
             if let Some(a) = st.accuracy.filter(|_| st.hits.is_some_and(|h| h > 0)) {
                 let _ = out.send(FromHud::Accuracy(a));

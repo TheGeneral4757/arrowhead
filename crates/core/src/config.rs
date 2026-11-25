@@ -37,6 +37,7 @@ pub struct Config {
     pub updates: Updates,
     pub log: Log,
     pub match_friend: MatchFriend,
+    pub debug: Debug,
 }
 
 impl Default for Config {
@@ -54,6 +55,7 @@ impl Default for Config {
             ui: Ui::default(),
             updates: Updates::default(),
             log: Log::default(),
+            debug: Debug::default(),
             match_friend: MatchFriend::default(),
         }
     }
@@ -271,6 +273,15 @@ impl Default for Updates {
     fn default() -> Self {
         Self { check: true }
     }
+}
+
+/// Developer aids, off by default.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Debug {
+    /// Keep the last 10 s of playfield frames and presses; dump them when the Misses counter
+    /// rises (`<data>/flight/`, spec 13 3.2).
+    pub flight_recorder: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

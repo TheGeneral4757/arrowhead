@@ -109,6 +109,7 @@ export type Config = {
     seat: "auto" | "left" | "right";
   };
   match_friend: { on: boolean; margin_pct: number };
+  debug: { flight_recorder: boolean };
   ui: { overlay: AutoOnOff; minimise_while_playing: AutoOnOff; hud_reader: boolean; ocr_model: string; overlay_output: string };
   updates: { check: boolean };
   log: { level: string; per_note: boolean };
