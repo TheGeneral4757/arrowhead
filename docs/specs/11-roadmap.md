@@ -44,5 +44,7 @@ Next (2026-11-24): before PR #12 merges, work through [13 Accuracy plan](13-accu
 
 Status (2026-11-25): accuracy plan phases 1-6 built and checked offline on the 2026-11-24 clips (status per phase in [13](13-accuracy-plan.md)). Next: re-record the six songs with the fixes (overlay on and off, `[debug] flight_recorder = true`), compare with the table in 13, then the Windows checks and checklist rows 10-11.
 
+Status (2026-11-25, later): the user's own live runs on Linux worked as expected. Released as v0.2.0 with Windows (P7, P9-P13) still untested on real hardware (CI builds and tests it); the release notes say so. Manual checklist rows 10-11 were not filled in item by item.
+
 ## v0.3.0 and later (unordered)
 AUR publish automation; libei input fallback; DMA-BUF capture if measurements need it; Hallmark lint hook; landing page.
