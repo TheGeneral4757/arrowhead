@@ -34,7 +34,7 @@ jobs:
       - name: Linux build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libgtk-3-dev libpipewire-0.3-dev clang libxkbcommon-dev libwayland-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev libgtk-3-dev libpipewire-0.3-dev clang libxkbcommon-dev libwayland-dev file librsvg2-dev
 
       - uses: actions/setup-node@v4
         with:
@@ -47,15 +47,20 @@ jobs:
       - run: npm ci
         working-directory: ui
 
-      # tauri build runs the UI build first (beforeBuildCommand); --no-bundle: the tarball is ours.
-      - name: Build app, cli, overlay
-        run: |
-          npm --prefix ui run tauri build -- --no-bundle
-          cargo build --release -p arrowhead-cli -p arrowhead-overlay
-
       # Pinned by SHA-256 in the script (CC BY-SA 4.0 models, see THIRD_PARTY_NOTICES.md).
       - name: Fetch OCR models
         run: bash packaging/fetch-ocr-models.sh default target/ocr-models
+
+      # tauri build runs the UI build first (beforeBuildCommand) and bundles the AppImage with
+      # tauri.appimage.conf.json: the overlay as a sidecar next to the app (it needs the
+      # target-suffixed copy) and the OCR models under usr/lib/arrowhead/models. The tarball is ours.
+      - name: Build app (AppImage), cli, overlay
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          cargo build --release -p arrowhead-cli -p arrowhead-overlay
+          cp target/release/arrowhead-overlay target/release/arrowhead-overlay-x86_64-unknown-linux-gnu
+          npm --prefix ui run tauri build -- --bundles appimage --config ../crates/app/tauri.appimage.conf.json
 
       - name: Package
         env:
@@ -72,10 +77,13 @@ jobs:
           cp crates/app/icons/128x128@2x.png "dist/$name/icons/256.png"
           cp crates/app/icons/icon.png "dist/$name/icons/512.png"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
-          echo "ASSET=$name.tar.gz" >> "$GITHUB_ENV"
+          cp target/release/bundle/appimage/*.AppImage "dist/$name.AppImage"
+          chmod +x "dist/$name.AppImage"
+          echo "TARBALL=$name.tar.gz" >> "$GITHUB_ENV"
+          echo "ASSET=$name.AppImage" >> "$GITHUB_ENV"
 
-      # The updater manifest (spec 10). --no-bundle makes no updater artifacts, so the tarball
-      # is signed here with the updater key.
+      # The updater manifest (spec 10). The updater can replace an AppImage (not a tarball), so
+      # the AppImage is what gets signed here and listed for linux-x86_64.
       - name: Sign and write latest.json
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -93,12 +101,12 @@ jobs:
             --arg url "https://github.com/${{ github.repository }}/releases/download/$TAG/$ASSET" \
             '{version: $version, notes: $notes, pub_date: $pub_date, platforms: {"linux-x86_64": {signature: $signature, url: $url}}}' \
             > latest.json
-          sha256sum "$ASSET" latest.json > SHA256SUMS
+          sha256sum "$TARBALL" "$ASSET" latest.json > SHA256SUMS
 
       - name: Upload to the release
         run: |
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
-          gh release upload "$TAG" dist/"$ASSET" dist/"$ASSET".sig dist/latest.json dist/SHA256SUMS --clobber
+          gh release upload "$TAG" dist/"$TARBALL" dist/"$ASSET" dist/"$ASSET".sig dist/latest.json dist/SHA256SUMS --clobber
 
       # Release body: release-please notes (highlights + changes) with an Install block before the
       # first "### " section and a footer. Runs after latest.json so the updater gets the plain notes.

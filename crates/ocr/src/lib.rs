@@ -36,11 +36,13 @@ fn search_dirs(set: &str) -> Vec<PathBuf> {
     if let Some(d) = std::env::var_os("ARROWHEAD_MODELS") {
         v.push(sub(d.into()));
     }
-    if let Some(d) = std::env::current_exe()
+    if let Some(bin) = std::env::current_exe()
         .ok()
-        .and_then(|e| e.parent().map(|p| p.join("models")))
+        .and_then(|e| e.parent().map(PathBuf::from))
     {
-        v.push(sub(d));
+        v.push(sub(bin.join("models")));
+        // AppImage: Tauri resources land in <AppDir>/usr/lib/arrowhead next to usr/bin
+        v.push(sub(bin.join("../lib/arrowhead/models")));
     }
     v.push(sub("/usr/share/arrowhead/models".into()));
     v.push(sub("/usr/lib/arrowhead/models".into()));
@@ -71,7 +73,8 @@ pub fn find_models(set: &str) -> Option<PathBuf> {
 
 impl Ocr {
     /// Loads model set `model` ("default" = the bundled ocrs models) from the first dir that
-    /// has both files: $ARROWHEAD_MODELS, `models/` next to the exe, /usr/share/arrowhead/models,
+    /// has both files: $ARROWHEAD_MODELS, `models/` next to the exe, `../lib/arrowhead/models`
+    /// from the exe (AppImage), /usr/share/arrowhead/models,
     /// /usr/lib/arrowhead/models, ~/.cache/ocrs. Other sets live in `<dir>/<model>/`.
     pub fn load(model: &str) -> Result<Self, String> {
         let dir = find_models(model).ok_or_else(|| {

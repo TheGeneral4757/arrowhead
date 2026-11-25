@@ -1,0 +1,14 @@
+{
+  "bundle": {
+    "externalBin": ["../../target/release/arrowhead-overlay"],
+    "resources": {
+      "../../target/ocr-models/*": "models/",
+      "../../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+    },
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    }
+  }
+}
