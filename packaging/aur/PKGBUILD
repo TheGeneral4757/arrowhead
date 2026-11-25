@@ -2,7 +2,7 @@
 # arrowhead is written with AI (Claude Code, Claude Opus 5.5), directed and tested by its maintainer.
 # Automating input in Roblox breaks its Terms of Use: private servers only, at your own risk.
 pkgname=arrowhead-bin
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="Screen-reading Funky Friday (Roblox) autoplayer for private servers"
 arch=('x86_64')
@@ -14,7 +14,7 @@ optdepends=('xdg-desktop-portal-kde: screen capture and hotkeys on KDE Plasma'
 provides=('arrowhead')
 conflicts=('arrowhead')
 source=("$url/releases/download/v$pkgver/arrowhead-$pkgver-linux-x86_64.tar.gz")
-sha256sums=('377fb9084fde1bee77a58da8c120e583635f789e3ccf41e4fcd8f926341834b6')
+sha256sums=('0c92387d7659086943034eb5f48d5284371d956ada464a41852b10899d4285c5')
 
 package() {
   cd "arrowhead-$pkgver-linux-x86_64"

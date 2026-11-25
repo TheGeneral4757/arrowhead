@@ -1,6 +1,6 @@
 pkgbase = arrowhead-bin
 	pkgdesc = Screen-reading Funky Friday (Roblox) autoplayer for private servers
-	pkgver = 0.1.0
+	pkgver = 0.2.0
 	pkgrel = 1
 	url = https://github.com/TheGeneral4757/arrowhead
 	arch = x86_64
@@ -14,7 +14,7 @@ pkgbase = arrowhead-bin
 	optdepends = xdg-desktop-portal-hyprland: screen capture and hotkeys on Hyprland
 	provides = arrowhead
 	conflicts = arrowhead
-	source = https://github.com/TheGeneral4757/arrowhead/releases/download/v0.1.0/arrowhead-0.1.0-linux-x86_64.tar.gz
-	sha256sums = 377fb9084fde1bee77a58da8c120e583635f789e3ccf41e4fcd8f926341834b6
+	source = https://github.com/TheGeneral4757/arrowhead/releases/download/v0.2.0/arrowhead-0.2.0-linux-x86_64.tar.gz
+	sha256sums = 0c92387d7659086943034eb5f48d5284371d956ada464a41852b10899d4285c5
 
 pkgname = arrowhead-bin
