@@ -84,6 +84,8 @@ Status (2026-11-25): 5.1-5.3 and 5.5 built (see spec 03, results by OCR, update 
 | 5.5 | Accuracy unit: history stores 1.0 for Deathmatch's 100% and 55.33 elsewhere; store percent everywhere | `runner/src/hud.rs` | History rows agree on units |
 
 ### Phase 6: faster, safer starts
+Status (2026-11-25): built. 6.1: layout and colours already come from the profile; what a restart waited for was 1.5 s of stage background. The detector's adapted background is now kept in memory for the life of the app (`runner::WARM`, keyed by layout), so a Stop/Start in one session starts from one frame. The last scroll speed is not kept: the tracker fits it from about 5 frames of the first notes, and a wrong seeded speed can stop notes from ever confirming (below). 6.2: a menu start replayed offline (`ghost-menu.ahclip`, Ghost video 0-16 s: menu, countdown from 5 s, notes from 10.8 s) planned only 5 presses in the song's first 5 s, and so did a countdown start: the countdown's grey key labels under the receptors move with the stage's zoom-in, read as trail ends, and set a speed of 0.15 px/ms that real notes then never matched (they confirm only near the current speed), the likely cause of the live run's early misses. The first speed now comes from heads only (trail ends join once a speed exists): both starts plan 89 presses from the first note at 10.86 s with 0 speed changes; `jacks.ahclip` and `ghost-62.ahclip` are unchanged. A background learned on the menu needs no relearn: heads are found by colour, and the background (used for trails) adapts in about 0.2 s.
+
 | # | Change | Where | Done when |
 |---|---|---|---|
 | 6.1 | Keep learned colours and the last scroll speed across a restart in the same session | `runner/src/lib.rs` | Restart mid-song plays within 1 s |

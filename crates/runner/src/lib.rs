@@ -89,7 +89,13 @@ fn next(src: &mut dyn FrameSource) -> Res<OwnedFrame> {
     }
 }
 
-/// Background median from frames spread over `secs` (spec 03, colour learning).
+/// The last run's stage background for its layout, kept for the life of the process so a
+/// restart (Stop, Start) plays at once instead of learning it again for 1.5 s (spec 13, 6.1).
+/// Colours and the layout already come from the profile.
+static WARM: std::sync::Mutex<Option<(Layout, [Vec<u8>; 4])>> = std::sync::Mutex::new(None);
+
+/// Background median from frames spread over `secs` (spec 03, colour learning), or the last
+/// run's background for this layout from one frame.
 fn bg_learner(
     src: &mut dyn FrameSource,
     layout: &Layout,
@@ -97,6 +103,16 @@ fn bg_learner(
     secs: f32,
 ) -> Res<ColourLearner> {
     src.set_region(layout.region(cfg));
+    let warm = WARM
+        .lock()
+        .ok()
+        .and_then(|w| w.as_ref().filter(|w| w.0 == *layout).map(|w| w.1.clone()));
+    if let Some(bg) = warm {
+        let f = next(src)?;
+        let mut l = ColourLearner::new(layout.clone(), cfg.clone(), &[f.view()]);
+        l.bg = bg;
+        return Ok(l);
+    }
     let mut bg = Vec::new();
     let step = Duration::from_secs_f32(secs / 20.0);
     for _ in 0..21 {
@@ -1035,6 +1051,12 @@ pub fn run(src: &mut dyn FrameSource, o: Opts, ctl: Arc<Control>, tx: Tx) -> Res
                 s.clear();
             }
         }
+    }
+    if let Ok(mut w) = WARM.lock() {
+        *w = Some((
+            eng.det.layout.clone(),
+            std::array::from_fn(|l| eng.det.background(l)),
+        ));
     }
     sched_stop.store(true, Ordering::SeqCst);
     let _ = sched.join();
