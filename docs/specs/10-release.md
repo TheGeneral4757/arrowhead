@@ -13,12 +13,18 @@ milestone: M5
 ## Release build (`.github/workflows/release.yml`, on tag)
 | Runner | Build | Assets |
 |---|---|---|
-| ubuntu-24.04 | `tauri build --no-bundle` for the app; `cargo build --release` for cli and overlay | `arrowhead-X.Y.Z-linux-x86_64.tar.gz` (app, cli, overlay, `models/`, LICENSE, THIRD_PARTY_NOTICES.md, README, `arrowhead.desktop`, `icons/{32,128,256,512}.png`) |
+| ubuntu-24.04 | `cargo build --release` for cli and overlay; `tauri build --bundles appimage --config crates/app/tauri.appimage.conf.json` for the app (v0.2) | `arrowhead-X.Y.Z-linux-x86_64.tar.gz` (app, cli, overlay, `models/`, LICENSE, THIRD_PARTY_NOTICES.md, README, `arrowhead.desktop`, `icons/{32,128,256,512}.png`) and `arrowhead-X.Y.Z-linux-x86_64.AppImage` |
 | windows-latest (v0.2) | `tauri build` with the MSI bundler | `arrowhead-X.Y.Z-windows-x86_64.msi`, portable `arrowhead-X.Y.Z-windows-x86_64.zip` |
 
-Plus `SHA256SUMS` and the updater manifest `latest.json` (the tarball is signed with `tauri signer sign`, since `--no-bundle` makes no updater artifacts) signed with the Tauri updater key (secret `TAURI_SIGNING_PRIVATE_KEY` in repo secrets; the public key is in `tauri.conf.json`).
+Plus `SHA256SUMS` and the updater manifest `latest.json`, whose `linux-x86_64` entry is the AppImage (v0.2; it was the tarball in v0.1), signed with `tauri signer sign` and the Tauri updater key (secret `TAURI_SIGNING_PRIVATE_KEY` in repo secrets; the public key is in `tauri.conf.json`).
 
 Linux runtime deps (documented in README): webkit2gtk-4.1, libsoup3, gtk3, pipewire, xdg-desktop-portal + a backend (kde or hyprland).
+
+## AppImage (v0.2)
+- `crates/app/tauri.appimage.conf.json` is passed with `--config` only for the release and CI builds, so `tauri dev` on Linux needs no sidecar: it adds the overlay as `externalBin` (Tauri needs the target-suffixed copy `arrowhead-overlay-x86_64-unknown-linux-gnu` first) and the OCR models and THIRD_PARTY_NOTICES.md as resources. In the AppDir the overlay sits next to the app in `usr/bin` (where `overlay::binary` looks) and the models in `usr/lib/arrowhead/models`, which `arrowhead-ocr` searches as `<exe dir>/../lib/arrowhead/models`.
+- linuxdeploy runs with `APPIMAGE_EXTRACT_AND_RUN=1` (no FUSE on the runner); the runner also needs `file` and `librsvg2-dev`. It bundles WebKitGTK, so the AppImage is large and needs only `libfuse2` on the host. On the Arch dev box linuxdeploy's gtk plugin fails on host libraries (VMware's gdk-pixbuf, missing libcroco): build AppImages on Ubuntu (CI).
+- `ci.yml` job `appimage` builds it on every pull request and checks the app, overlay and both models are inside.
+- The app sees `$APPIMAGE` and offers "Update and restart" (`can_install`); the updater replaces the AppImage file.
 
 ## OCR models (v0.2)
 - The HUD reader's OCR teacher needs `text-detection.onnx` and `text-recognition.onnx` ([03](03-detection.md#ocr-teacher-v02)). `packaging/fetch-ocr-models.sh default <dest>` downloads them from the ocrs-models S3 bucket (the URLs `ocrs-cli` uses) and checks pinned SHA-256 sums; a hash change fails the build. `release.yml` (both jobs) and the Windows leg of `ci.yml` run it into `target/ocr-models`. Models are never committed.
@@ -36,7 +42,7 @@ Linux runtime deps (documented in README): webkit2gtk-4.1, libsoup3, gtk3, pipew
 - On launch (if `updates.check`) and every 24 h: fetch `latest.json` from the GitHub release. This is the only network call the app makes.
 - Newer version: a pill in the top bar; Settings shows notes and an "Update and restart" button (tauri-plugin-updater: download, verify signature, replace, relaunch).
 - Never updates while `Playing`.
-- The updater can only replace an AppImage on Linux (and the MSI on Windows, v0.2). The tarball install therefore gets the notice and the release link, not "Update and restart" (`can_install` false).
+- The updater can only replace an AppImage on Linux (and the MSI on Windows, v0.2). The AppImage (v0.2) gets "Update and restart"; the tarball install gets the notice and the release link (`can_install` false).
 
 ## Repo setup (when the user approves going public)
 1. `gh repo create TheGeneral4757/arrowhead --public --source . --push`.
