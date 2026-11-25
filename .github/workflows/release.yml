@@ -17,7 +17,8 @@ env:
 
 jobs:
   linux:
-    runs-on: ubuntu-24.04
+    # 22.04 (glibc 2.35): the AppImage and the tarball then also run on older distros
+    runs-on: ubuntu-22.04
     env:
       TAG: ${{ github.event.inputs.tag || github.ref_name }}
       GH_TOKEN: ${{ github.token }}
