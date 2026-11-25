@@ -13,7 +13,7 @@ The reference images in `docs/research/ff-refs/` are rough examples, not evidenc
 | # | Question | Current default | How to answer | Answer |
 |---|---|---|---|---|
 | G1 | Judgment windows (Sick/Good/Ok/Bad) | 45/80/130/230 ms | Deliberate offset presses with readback; find where the judgment changes | |
-| G2 | Accuracy formula | weights 1/0.75/0.5/0.25/0 | Fit weights to 5+ results screens with known counts | Score is exact: 350/200/100/50 per Sick/Good/Ok/Bad, -30 per Miss (Gospel: 243/177/123/115/69 -> 136430; also 654 misses -> -19620). Checked on 3 screens (Gospel, Manifest, Deathmatch). Accuracy is not count-weighted: no monotonic weights fit all three, and the exact solve puts Bad above Ok. Likely per-hit ms-based. Read accuracy from the HUD; do not predict it from counts |
+| G2 | Accuracy formula | weights 1/0.75/0.5/0.25/0 | Fit weights to 5+ results screens with known counts | Score is exact: 350/200/100/50 per Sick/Good/Ok/Bad, -30 per Miss (Gospel: 243/177/123/115/69 -> 136430; also 654 misses -> -19620). Checked on 3 screens (Gospel, Manifest, Deathmatch), and again on Pico, Accelerant and Ghost (2026-11-24). Deathmatch 100% with all Sick at -3.39 ms mean; Pico 96.20% = 709/737; Accelerant 98.71% does not fit its counts. Accuracy is not count-weighted: no monotonic weights fit all three, and the exact solve puts Bad above Ok. Likely per-hit ms-based. Read accuracy from the HUD; do not predict it from counts |
 | G3 | Does the ms readout exist on this version, is it a setting, where is it? | assumed present | Look in a song and in settings | Yes, always on: signed "n.nn ms" under the judgment popup (ours in our playfield, opponent's near theirs). Setting not checked |
 | G4 | ms readout sign (is positive late?) | -1 (positive = early) | Press 50 ms late on purpose | Confirmed by user: late = negative ms, early = positive. `readback_sign = -1` |
 | G5 | Default keybinds: do both A S W D and arrows work? | A S W D | Press each in a song | Both A S W D and arrows work (user). A S W D shown under receptors at song start |
@@ -25,7 +25,8 @@ The reference images in `docs/research/ff-refs/` are rough examples, not evidenc
 | G11 | Results screen: is there a stable element to detect? | receptors gone 1.5 s | Record the end of a song | Yes: "Stats from last song" panel (accuracy, mean ms, combos, counts, total notes, final score) |
 | G12 | Do receptors light up on press (side detection relies on it)? | assumed yes | Record presses | Yes: grey receptors light up in the lane colour on press |
 | G13 | Upscroll default or downscroll default? | detected | Settings | User plays upscroll only. Keep detection; downscroll stays supported but untested |
-| G14 | In a song, does Mean MS on the stats panel equal the ms readout after the first hit (same value and sign)? | assumed yes (the ms font is taught from it) | Hit one note, compare the two | |
+| G14 | In a song, does Mean MS on the stats panel equal the ms readout after the first hit (same value and sign)? | assumed yes (the ms font is taught from it) | Hit one note, compare the two | No: same value, opposite sign. The panel shows +5.1 while popups and the results screen show negative (2026-11-24 clips). Add `stats_mean_sign = -1` ([13](13-accuracy-plan.md) 1.1) |
+| G15 | Are ms readouts in real time or song time at rates other than 1.00x? | real time | Same offset at 1.00x and 2.00x, compare results Mean MS | Song time: Ghost at 2.00x showed -8.88 ms where 1.00x songs showed about -4.4 at the same offset. Divide by the rate ([13](13-accuracy-plan.md) 4.4) |
 
 ## Platform
 | # | Question | Default | How | Answer |

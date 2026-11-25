@@ -26,6 +26,8 @@ pub struct Overlay {
     replay: [Option<Value>; 2],
     win: Option<WebviewWindow>,
     minimise: AutoOnOff,
+    /// One monitor: the overlay covers the main window, so Auto minimises it.
+    single: bool,
     minimised: bool,
     batch: Vec<Value>,
     last_notes_ms: f64,
@@ -129,6 +131,7 @@ impl Overlay {
                 replay: [None, None],
                 win: app.get_webview_window("main"),
                 minimise,
+                single: monitors == 1,
                 minimised: false,
                 batch: Vec::new(),
                 last_notes_ms: f64::MIN,
@@ -203,7 +206,7 @@ impl Overlay {
         let Some(win) = &self.win else { return };
         let up = match self.minimise {
             AutoOnOff::On => true,
-            AutoOnOff::Auto => self.tx.is_some(),
+            AutoOnOff::Auto => self.tx.is_some() && self.single,
             AutoOnOff::Off => false,
         };
         match state {
