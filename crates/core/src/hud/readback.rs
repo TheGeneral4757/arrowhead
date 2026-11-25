@@ -59,6 +59,11 @@ impl Readback {
         }
     }
 
+    /// Whether `raw_ms` would be a new readout (not the one already seen).
+    pub fn is_new(&self, raw_ms: f32) -> bool {
+        self.blank || self.last != Some(raw_ms)
+    }
+
     /// The ms region held no text this tick: the next read is a new readout even if equal.
     pub fn on_blank(&mut self) {
         self.blank = true;
@@ -74,6 +79,19 @@ impl Readback {
         raw_ms: f32,
         lane: Option<u8>,
         presses: &[SentPress],
+    ) -> Option<Matched> {
+        self.on_read_adapt(at, raw_ms, lane, presses, true)
+    }
+
+    /// `on_read`; with `adapt` false the read is matched but the bias stays (a reading that
+    /// could not be confirmed, spec 13 4.3).
+    pub fn on_read_adapt(
+        &mut self,
+        at: Nanos,
+        raw_ms: f32,
+        lane: Option<u8>,
+        presses: &[SentPress],
+        adapt: bool,
     ) -> Option<Matched> {
         let new = self.blank || self.last != Some(raw_ms);
         self.last = Some(raw_ms);
@@ -93,6 +111,14 @@ impl Readback {
             .0;
         let hit = raw_ms * self.sign;
         let want = presses[i].intended_err_ms;
+        if !adapt {
+            return Some(Matched {
+                press: i,
+                hit_error_ms: hit,
+                intended_err_ms: want,
+                bias_ms: self.bias_ms,
+            });
+        }
         let next = if self.fast_count < self.fast_n {
             // Each error was measured under the bias then in force; restate it at the start bias.
             self.fast_count += 1;
@@ -170,6 +196,21 @@ mod tests {
             .on_read(Nanos::from_ms(at + 1.0), -20.0, None, &ps)
             .unwrap();
         assert!((m.bias_ms - (last - 1.0)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn unconfirmed_read_matches_without_moving() {
+        let mut rb = Readback::new(-5.0);
+        let ps = [press(0.0, 0, 0.0)];
+        let m = rb
+            .on_read_adapt(Nanos::from_ms(100.0), -30.0, None, &ps, false)
+            .unwrap();
+        assert_eq!((m.hit_error_ms, m.bias_ms), (30.0, -5.0));
+        // and it still counts as seen: the same text next tick is not new
+        assert!(
+            rb.on_read(Nanos::from_ms(120.0), -30.0, None, &ps)
+                .is_none()
+        );
     }
 
     #[test]

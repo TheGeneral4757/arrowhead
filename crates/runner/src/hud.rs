@@ -135,7 +135,22 @@ struct Song {
     /// For the HUD view: the last ms readout read, and what the matcher is doing.
     ms_read: Option<f32>,
     match_note: Option<String>,
+    /// Popups matched to a press but not confirmed by the panel (not adapted on).
+    unconfirmed: u32,
+    /// The last one-hit step of the panel: (popup value it implies, tolerance, pts).
+    step: Option<(f32, f32, Nanos)>,
 }
+
+/// The popup value the stats panel implies when Hits went up by exactly one between `prev` and
+/// `now`: the Mean MS change times `sign` (G14), and its rounding tolerance.
+fn one_hit_step(prev: Option<StatsRead>, now: Option<StatsRead>, sign: f32) -> Option<(f32, f32)> {
+    let (p, n) = (prev?, now?);
+    let (v, tol) = crate::ocrteach::hit_ms_from_mean(p.mean_ms?, p.hits?, n.mean_ms?, n.hits?)?;
+    Some((v * sign, tol + 0.005))
+}
+
+/// A popup may show a tick after the panel changed.
+const STEP_KEEP_MS: f64 = 120.0;
 
 /// Keep `v` as side's score when it is a move the score can make since the last trusted one.
 fn accept_score(slot: &mut Option<(i32, Instant)>, v: i32) -> bool {
@@ -413,6 +428,17 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                     engine_missed,
                     watchdog,
                 }) => {
+                    if song.unconfirmed + song.resid.len() as u32 > 0 {
+                        log(
+                            &tx,
+                            Level::Info,
+                            format!(
+                                "readback: {} popups confirmed by the stats panel and used, {} not confirmed (ignored)",
+                                song.resid.len(),
+                                song.unconfirmed
+                            ),
+                        );
+                    }
                     let done = PendingResults {
                         song: std::mem::take(&mut song),
                         offset_ms,
@@ -878,6 +904,10 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
             {
                 let _ = fl.try_send(crate::flight::Msg::Missed { from, to });
             }
+            if st.hits != prev.0.and_then(|p| p.hits) {
+                song.step =
+                    one_hit_step(prev.0, Some(st), s.stats_mean_sign).map(|(v, t)| (v, t, pts));
+            }
             if let Some(a) = st.accuracy.filter(|_| st.hits.is_some_and(|h| h > 0)) {
                 let _ = out.send(FromHud::Accuracy(a));
             }
@@ -952,7 +982,17 @@ fn run(tap: Option<Arc<AuxTap>>, s: HudSetup, rx: Receiver<ToHud>, out: Sender<F
                 (_, true) => rb.on_blank(),
                 (Some(raw), _) if (raw * rb.sign).abs() <= s.windows.bad + 20.0 => {
                     let before = rb.bias_ms;
-                    if let Some(m) = rb.on_read(pts, raw, None, presses.make_contiguous()) {
+                    // Adapt only when the stats panel confirms it (spec 13, 4.3): Hits went up
+                    // by one this tick and the Mean MS change says the popup's value.
+                    let confirmed = rb.is_new(raw)
+                        && song.step.take().is_some_and(|(v, tol, t)| {
+                            pts.ms_since(t) <= STEP_KEEP_MS && (raw - v).abs() <= tol
+                        });
+                    let read =
+                        rb.on_read_adapt(pts, raw, None, presses.make_contiguous(), confirmed);
+                    if !confirmed {
+                        song.unconfirmed += u32::from(read.is_some());
+                    } else if let Some(m) = read {
                         song.hit_errs.push(m.hit_error_ms);
                         song.resid.push(m.hit_error_ms - m.intended_err_ms);
                         song.bias_sum += f64::from(before);
@@ -1508,6 +1548,24 @@ mod tests {
         song.hit_errs = song.resid.clone();
         let t = offset_target(&song, 9.0, Some(4.0)).unwrap();
         assert!((t - -1.42).abs() < 1e-3, "{t}");
+    }
+
+    #[test]
+    fn popup_confirmed_only_by_a_one_hit_step_with_the_panel_sign() {
+        let st = |hits, mean| {
+            Some(StatsRead {
+                hits: Some(hits),
+                mean_ms: Some(mean),
+                ..StatsRead::default()
+            })
+        };
+        // panel Mean 5.00 over 10 hits -> 5.20 over 11: the new hit was +7.20 on the panel,
+        // so the popup (opposite sign, G14) shows -7.20
+        let (v, tol) = one_hit_step(st(10, 5.0), st(11, 5.2), -1.0).unwrap();
+        assert!((v - -7.2).abs() <= tol && tol < 0.2, "{v} {tol}");
+        assert!((7.2 - v).abs() > tol); // a wrong-sign popup is not confirmed
+        assert_eq!(one_hit_step(st(10, 5.0), st(12, 5.2), -1.0), None); // two hits: no check
+        assert_eq!(one_hit_step(None, st(11, 5.2), -1.0), None);
     }
 
     #[test]
